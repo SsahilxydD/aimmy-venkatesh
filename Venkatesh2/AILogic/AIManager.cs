@@ -120,7 +120,16 @@ namespace Venkatesh2.AILogic
 
             _modeloptions = new RunOptions();
 
-            var sessionOptions = new SessionOptions
+            // Attempt to load via DirectML (else fallback to CPU). Session options are rebuilt per attempt
+            // so a failed DML registration doesn't contaminate the CPU fallback's provider list.
+            Task.Run(() => InitializeModel(modelPath));
+        }
+
+        #region Models
+
+        private static SessionOptions BuildSessionOptions()
+        {
+            return new SessionOptions
             {
                 EnableCpuMemArena = true,
                 EnableMemoryPattern = false,
@@ -129,18 +138,13 @@ namespace Venkatesh2.AILogic
                 InterOpNumThreads = 1,
                 IntraOpNumThreads = 4
             };
-
-            // Attempt to load via DirectML (else fallback to CPU)
-            Task.Run(() => InitializeModel(sessionOptions, modelPath));
         }
 
-        #region Models
-
-        private async Task InitializeModel(SessionOptions sessionOptions, string modelPath)
+        private async Task InitializeModel(string modelPath)
         {
             try
             {
-                await LoadModelAsync(sessionOptions, modelPath, useDirectML: true);
+                await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML: true);
             }
             catch (Exception ex)
             {
@@ -148,7 +152,7 @@ namespace Venkatesh2.AILogic
 
                 try
                 {
-                    await LoadModelAsync(sessionOptions, modelPath, useDirectML: false);
+                    await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML: false);
                 }
                 catch (Exception e)
                 {
@@ -159,12 +163,39 @@ namespace Venkatesh2.AILogic
             FileManager.CurrentlyLoadingModel = false;
         }
 
+        // Registers the DirectML EP with settings tuned for a dedicated discrete GPU (e.g. RTX 4070 Super).
+        // ORT 1.23's C# surface only exposes device_id for DML directly, so perf hints are routed
+        // through session config entries — ORT silently ignores keys it doesn't recognize on older
+        // builds, which makes this safe to leave in.
+        private static void AppendDirectMLProvider(SessionOptions sessionOptions)
+        {
+            // Record the DML command list on the first inference and replay it on subsequent
+            // calls. Safe for our workload because input shape is fixed for the lifetime of a session
+            // (IMAGE_SIZE change triggers a full model reload) and _reusableTensor stays pinned.
+            try { sessionOptions.AddSessionConfigEntry("ep.dml.enable_graph_capture", "1"); } catch { }
+            // Subgraph fusion hint for dynamic-shape YOLOv8 exports.
+            try { sessionOptions.AddSessionConfigEntry("ep.dml.enable_dynamic_graph_fusion", "1"); } catch { }
+            // Prefer the highest-performance adapter when DML has to choose between multiple.
+            try { sessionOptions.AddSessionConfigEntry("ep.dml.performance_preference", "high_performance"); } catch { }
+
+            // deviceId=0 is the primary DXGI adapter, which Windows "Graphics Settings" aliases to
+            // the high-performance GPU when one is available. Explicit over implicit so a stale
+            // iGPU doesn't win the pick on hybrid systems.
+            sessionOptions.AppendExecutionProvider_DML(0);
+        }
+
         private Task LoadModelAsync(SessionOptions sessionOptions, string modelPath, bool useDirectML)
         {
             try
             {
-                if (useDirectML) { sessionOptions.AppendExecutionProvider_DML(); }
-                else { sessionOptions.AppendExecutionProvider_CPU(); }
+                if (useDirectML)
+                {
+                    AppendDirectMLProvider(sessionOptions);
+                }
+                else
+                {
+                    sessionOptions.AppendExecutionProvider_CPU();
+                }
 
                 _onnxModel = new InferenceSession(modelPath, sessionOptions);
                 _outputNames = new List<string>(_onnxModel.OutputMetadata.Keys);
