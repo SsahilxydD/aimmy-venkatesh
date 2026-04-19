@@ -3,9 +3,9 @@ name: .NET Core Desktop
 
 on:
   push:
-    branches: [ "Aimmy-V2" ]
+    branches: [ "Venkatesh-V2" ]
   pull_request:
-    branches: [ "Aimmy-V2" ]
+    branches: [ "Venkatesh-V2" ]
     paths-ignore:
       - 'models/**'
       - 'configs/**'
@@ -22,8 +22,8 @@ jobs:
                              # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
 
     env:
-      Solution_Name: Aimmy2.sln                         # Replace with your solution name, i.e. MyWpfApp.sln.
-      Wpf_Project_Path: Aimmy2\Aimmy2.csproj
+      Solution_Name: Venkatesh2.sln                         # Replace with your solution name, i.e. MyWpfApp.sln.
+      Wpf_Project_Path: Venkatesh2\Venkatesh2.csproj
       #Wap_Project_Name: MyWpfApp.Package.wapproj
       
     steps:
@@ -62,5 +62,5 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: aimmyidk
-        path: Aimmy2\bin\x64\Release\
+        name: venkateshidk
+        path: Venkatesh2\bin\x64\Release\
