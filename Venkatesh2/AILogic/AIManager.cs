@@ -101,6 +101,9 @@ namespace Venkatesh2.AILogic
         private float[]? _reusableInputArray;
         private List<NamedOnnxValue>? _reusableInputs;
 
+        // Reused per-frame detection list — avoids a new List<Prediction> allocation every inference call.
+        private readonly List<Prediction> _kdPredictions = new(32);
+
         private readonly CaptureManager _captureManager = new();
         #endregion Variables
 
@@ -761,8 +764,7 @@ namespace Venkatesh2.AILogic
                     KalmanPrediction.Detection detection = new()
                     {
                         X = detectedX,
-                        Y = detectedY,
-                        Timestamp = DateTime.UtcNow
+                        Y = detectedY
                     };
 
                     kalmanPrediction.UpdateKalmanFilter(detection);
@@ -772,19 +774,16 @@ namespace Venkatesh2.AILogic
                     break;
 
                 case "Shall0e's Prediction":
-                    // Update position (calculates velocity internally)
                     ShalloePredictionV2.UpdatePosition(detectedX, detectedY);
-
-                    // Get predicted position
-                    MouseManager.MoveCrosshair(ShalloePredictionV2.GetSPX(), ShalloePredictionV2.GetSPY());
+                    var shalloePos = ShalloePredictionV2.GetSP();
+                    MouseManager.MoveCrosshair(shalloePos.x, shalloePos.y);
                     break;
 
                 case "wisethef0x's EMA Prediction":
                     WiseTheFoxPrediction.WTFDetection wtfdetection = new()
                     {
                         X = detectedX,
-                        Y = detectedY,
-                        Timestamp = DateTime.UtcNow
+                        Y = detectedY
                     };
 
                     wtfpredictionManager.UpdateDetection(wtfdetection);
@@ -1104,7 +1103,8 @@ namespace Venkatesh2.AILogic
 
             int nd = NUM_DETECTIONS;
             int imageSize = IMAGE_SIZE;
-            var KDpredictions = new List<Prediction>(32); // most frames produce a handful; grow as needed
+            _kdPredictions.Clear();
+            var KDpredictions = _kdPredictions;
 
             // Fast path: YOLOv8 outputs a contiguous DenseTensor of shape [1, 4+classes, NUM_DETECTIONS].
             // Access it as a flat Span<float> so the inner loop is plain pointer arithmetic instead of

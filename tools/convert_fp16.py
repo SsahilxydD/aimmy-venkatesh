@@ -40,7 +40,7 @@ def convert_file(src: str, dst: str) -> bool:
         onnx.save(model_fp16, dst)
         src_mb = os.path.getsize(src) / 1_048_576
         dst_mb = os.path.getsize(dst) / 1_048_576
-        print(f"  OK  {os.path.basename(src):60s}  {src_mb:6.1f} MB → {dst_mb:6.1f} MB")
+        print(f"  OK  {os.path.basename(src):60s}  {src_mb:6.1f} MB -> {dst_mb:6.1f} MB")
         return True
     except Exception:
         print(f"  FAIL {os.path.basename(src)}")
