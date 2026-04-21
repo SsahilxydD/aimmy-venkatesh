@@ -140,8 +140,24 @@ namespace Venkatesh2.AILogic
             };
         }
 
+        // Prefer a pre-converted FP16 sibling (<name>_fp16.onnx) when available.
+        // FP16 runs 2-3x faster on Ada Lovelace tensor cores via DirectML; the conversion
+        // script is in tools/convert_fp16.py.
+        private static string ResolveFp16Path(string modelPath)
+        {
+            string dir  = Path.GetDirectoryName(modelPath) ?? "";
+            string stem = Path.GetFileNameWithoutExtension(modelPath);
+            string fp16 = Path.Combine(dir, stem + "_fp16.onnx");
+            return File.Exists(fp16) ? fp16 : modelPath;
+        }
+
         private async Task InitializeModel(string modelPath)
         {
+            string resolved = ResolveFp16Path(modelPath);
+            if (!string.Equals(resolved, modelPath, StringComparison.OrdinalIgnoreCase))
+                Log(LogLevel.Info, $"FP16 model found — using {Path.GetFileName(resolved)} for faster inference.");
+            modelPath = resolved;
+
             try
             {
                 await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML: true);
