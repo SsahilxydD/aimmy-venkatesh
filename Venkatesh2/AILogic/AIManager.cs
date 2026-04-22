@@ -104,6 +104,79 @@ namespace Venkatesh2.AILogic
         // Reused per-frame detection list — avoids a new List<Prediction> allocation every inference call.
         private readonly List<Prediction> _kdPredictions = new(32);
 
+        // Reused grace-period prediction — avoids a new Prediction allocation on every miss frame.
+        private readonly Prediction _gracePrediction = new();
+
+        // ── Per-frame cache ───────────────────────────────────────────────────────────────
+        // Dictionary<string,dynamic> hash lookups cost ~30-50 cycles each. At 144 FPS the
+        // hot path touches 20+ keys. Cache them all once at frame start and read fields.
+        private bool _fcAimAssist;
+        private bool _fcShowDetectedPlayer;
+        private bool _fcConstantAiTracking;
+        private bool _fcPredictions;
+        private bool _fcStickyAim;
+        private bool _fcAutoTrigger;
+        private bool _fcSprayMode;
+        private bool _fcCursorCheck;
+        private bool _fcXAxisPct;
+        private bool _fcYAxisPct;
+        private bool _fcCollectData;
+        private bool _fcFovEnabled;
+        private bool _fcClosestToMouse;
+        private float _fcFovSize;
+        private float _fcMinConfidence;
+        private double _fcYOffset;
+        private double _fcXOffset;
+        private double _fcYOffsetPct;
+        private double _fcXOffsetPct;
+        private double _fcStickyThreshold;
+        private string _fcAimingAlignment = "Center";
+        private string _fcPredictionMethod = "Kalman Filter";
+        // Single P/Invoke mouse-position read per frame replaces 2-3 GetCursorPosition calls.
+        private System.Drawing.Point _fcMousePos;
+
+        // Target-class ID cached across frames — refreshed only when dropdown changes.
+        private string _cachedTargetClassStr = "";
+        private int _cachedTargetClassId = -1;
+
+        private void RefreshFrameCache()
+        {
+            _fcAimAssist          = Dictionary.toggleState["Aim Assist"];
+            _fcShowDetectedPlayer  = Dictionary.toggleState["Show Detected Player"];
+            _fcConstantAiTracking  = Dictionary.toggleState["Constant AI Tracking"];
+            _fcPredictions         = Dictionary.toggleState["Predictions"];
+            _fcStickyAim           = Dictionary.toggleState["Sticky Aim"];
+            _fcAutoTrigger         = Dictionary.toggleState["Auto Trigger"];
+            _fcSprayMode           = Dictionary.toggleState["Spray Mode"];
+            _fcCursorCheck         = Dictionary.toggleState["Cursor Check"];
+            _fcXAxisPct            = Dictionary.toggleState["X Axis Percentage Adjustment"];
+            _fcYAxisPct            = Dictionary.toggleState["Y Axis Percentage Adjustment"];
+            _fcCollectData         = Dictionary.toggleState["Collect Data While Playing"];
+            _fcFovEnabled          = Dictionary.toggleState["FOV"];
+            _fcFovSize             = (float)(double)Dictionary.sliderSettings["FOV Size"];
+            _fcMinConfidence       = (float)(double)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
+            _fcYOffset             = Dictionary.sliderSettings["Y Offset (Up/Down)"];
+            _fcXOffset             = Dictionary.sliderSettings["X Offset (Left/Right)"];;
+            _fcYOffsetPct          = Dictionary.sliderSettings["Y Offset (%)"];
+            _fcXOffsetPct          = Dictionary.sliderSettings["X Offset (%)"];
+            _fcStickyThreshold     = Dictionary.sliderSettings["Sticky Aim Threshold"];
+            _fcAimingAlignment     = Dictionary.dropdownState["Aiming Boundaries Alignment"];
+            _fcPredictionMethod    = Dictionary.dropdownState["Prediction Method"];
+            _fcClosestToMouse      = (string)Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse";
+
+            // Single P/Invoke for the frame — replaces repeated GetCursorPosition calls.
+            _fcMousePos = WinAPICaller.GetCursorPosition();
+
+            // Target-class ID — linear search only on dropdown change.
+            string tc = Dictionary.dropdownState["Target Class"];
+            if (tc != _cachedTargetClassStr)
+            {
+                _cachedTargetClassStr = tc;
+                _cachedTargetClassId  = tc == "Best Confidence" ? -1
+                    : _modelClasses.FirstOrDefault(c => c.Value == tc).Key;
+            }
+        }
+
         private readonly CaptureManager _captureManager = new();
         #endregion Variables
 
@@ -410,17 +483,17 @@ namespace Venkatesh2.AILogic
         #region AI
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool ShouldPredict() =>
-            Dictionary.toggleState["Show Detected Player"] ||
-            Dictionary.toggleState["Constant AI Tracking"] ||
+        private bool ShouldPredict() =>
+            _fcShowDetectedPlayer ||
+            _fcConstantAiTracking ||
             InputBindingManager.IsHoldingBinding("Aim Keybind") ||
             InputBindingManager.IsHoldingBinding("Second Aim Keybind");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static bool ShouldProcess() =>
-            Dictionary.toggleState["Aim Assist"] ||
-            Dictionary.toggleState["Show Detected Player"] ||
-            Dictionary.toggleState["Auto Trigger"];
+        private bool ShouldProcess() =>
+            _fcAimAssist ||
+            _fcShowDetectedPlayer ||
+            _fcAutoTrigger;
 
         // Target 144 FPS for the active AI loop; ~6.94ms per frame budget
         private const double TARGET_FRAME_MS = 1000.0 / 144.0;
@@ -440,6 +513,9 @@ namespace Venkatesh2.AILogic
                 }
 
                 frameTimer.Restart();
+
+                // Snapshot all Dictionary reads for this frame — one hash lookup per key instead of many.
+                RefreshFrameCache();
 
                 _captureManager.HandlePendingDisplayChanges();
 
@@ -486,80 +562,58 @@ namespace Venkatesh2.AILogic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private async Task AutoTrigger()
         {
-            // if auto trigger is disabled,
-            // or if the aim keybinds are not held,
-            // or if constant AI tracking is enabled,
-            // we check for spray release and return
-            if (!Dictionary.toggleState["Auto Trigger"] ||
+            if (!_fcAutoTrigger ||
                 !(InputBindingManager.IsHoldingBinding("Aim Keybind") && !InputBindingManager.IsHoldingBinding("Second Aim Keybind")) ||
-                Dictionary.toggleState["Constant AI Tracking"]) // this logic is a bit weird, but it works.
-                                                                // but it might need to be revised
+                _fcConstantAiTracking)
             {
                 CheckSprayRelease();
                 return;
             }
 
-
-            if (Dictionary.toggleState["Spray Mode"])
+            if (_fcSprayMode)
             {
                 await MouseManager.DoTriggerClick(LastDetectionBox);
                 return;
             }
 
-
-            if (Dictionary.toggleState["Cursor Check"])
+            if (_fcCursorCheck)
             {
-                var mousePos = WinAPICaller.GetCursorPosition();
+                var mousePos = _fcMousePos;
 
                 if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
-                {
                     return;
-                }
 
                 if (LastDetectionBox.Contains(mousePos.X, mousePos.Y))
-                {
                     await MouseManager.DoTriggerClick(LastDetectionBox);
-                }
             }
             else
             {
                 await MouseManager.DoTriggerClick();
             }
 
-            if (!Dictionary.toggleState["Aim Assist"] || !Dictionary.toggleState["Show Detected Player"]) return;
-
+            if (!_fcAimAssist || !_fcShowDetectedPlayer) return;
         }
+
         private void CheckSprayRelease()
         {
-            if (!Dictionary.toggleState["Spray Mode"]) return;
+            if (!_fcSprayMode) return;
 
-            // if auto trigger is disabled, we reset the spray state
-            // if the aim keybinds are not held, we reset the spray state
-            bool shouldSpray = Dictionary.toggleState["Auto Trigger"] &&
-                (InputBindingManager.IsHoldingBinding("Aim Keybind") && InputBindingManager.IsHoldingBinding("Second Aim Keybind")); //||
-                                                                                                                                     //Dictionary.toggleState["Constant AI Tracking"];
+            bool shouldSpray = _fcAutoTrigger &&
+                (InputBindingManager.IsHoldingBinding("Aim Keybind") && InputBindingManager.IsHoldingBinding("Second Aim Keybind"));
 
-            // spray mode might need to be revised - taylor
             if (!shouldSpray)
-            {
                 MouseManager.ResetSprayState();
-            }
         }
 
         private async void UpdateFOV()
         {
-            if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse" && Dictionary.toggleState["FOV"])
+            if (_fcClosestToMouse && _fcFovEnabled)
             {
-                var mousePosition = WinAPICaller.GetCursorPosition();
+                var mousePosition = _fcMousePos;
 
-                // Check if mouse is on the current display
                 if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePosition.X, mousePosition.Y)))
-                {
-                    // Mouse is on a different display - don't update FOV position
                     return;
-                }
 
-                // Translate mouse position relative to current display
                 var displayRelativeX = mousePosition.X - DisplayManager.ScreenLeft;
                 var displayRelativeY = mousePosition.Y - DisplayManager.ScreenTop;
 
@@ -679,85 +733,53 @@ namespace Venkatesh2.AILogic
         {
             AIConf = closestPrediction.Confidence;
 
-            if (Dictionary.toggleState["Show Detected Player"] && Dictionary.DetectedPlayerOverlay != null)
+            if (_fcShowDetectedPlayer && Dictionary.DetectedPlayerOverlay != null)
             {
                 UpdateOverlay(DetectedPlayerOverlay!, closestPrediction);
-                if (!Dictionary.toggleState["Aim Assist"]) return;
+                if (!_fcAimAssist) return;
             }
-
-            double YOffset = Dictionary.sliderSettings["Y Offset (Up/Down)"];
-            double XOffset = Dictionary.sliderSettings["X Offset (Left/Right)"];
-
-            double YOffsetPercentage = Dictionary.sliderSettings["Y Offset (%)"];
-            double XOffsetPercentage = Dictionary.sliderSettings["X Offset (%)"];
 
             var rect = closestPrediction.Rectangle;
 
-            if (Dictionary.toggleState["X Axis Percentage Adjustment"])
-            {
-                detectedX = (int)((rect.X + (rect.Width * (XOffsetPercentage / 100))) * scaleX);
-            }
-            else
-            {
-                detectedX = (int)((rect.X + rect.Width / 2) * scaleX + XOffset);
-            }
+            detectedX = _fcXAxisPct
+                ? (int)((rect.X + rect.Width * (_fcXOffsetPct / 100)) * scaleX)
+                : (int)((rect.X + rect.Width / 2) * scaleX + _fcXOffset);
 
-            if (Dictionary.toggleState["Y Axis Percentage Adjustment"])
-            {
-                detectedY = (int)((rect.Y + rect.Height - (rect.Height * (YOffsetPercentage / 100))) * scaleY + YOffset);
-            }
-            else
-            {
-                detectedY = CalculateDetectedY(scaleY, YOffset, closestPrediction);
-            }
+            detectedY = _fcYAxisPct
+                ? (int)((rect.Y + rect.Height - rect.Height * (_fcYOffsetPct / 100)) * scaleY + _fcYOffset)
+                : CalculateDetectedY(scaleY, _fcYOffset, closestPrediction);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static int CalculateDetectedY(float scaleY, double YOffset, Prediction closestPrediction)
+        private int CalculateDetectedY(float scaleY, double yOffset, Prediction closestPrediction)
         {
             var rect = closestPrediction.Rectangle;
-            float yBase = rect.Y;
-            float yAdjustment = 0;
-
-            switch (Dictionary.dropdownState["Aiming Boundaries Alignment"])
+            float yAdjustment = _fcAimingAlignment switch
             {
-                case "Center":
-                    yAdjustment = rect.Height / 2;
-                    break;
-
-                case "Top":
-                    // yBase is already at the top
-                    break;
-
-                case "Bottom":
-                    yAdjustment = rect.Height;
-                    break;
-            }
-
-            return (int)((yBase + yAdjustment) * scaleY + YOffset);
+                "Center" => rect.Height / 2,
+                "Bottom" => rect.Height,
+                _        => 0f
+            };
+            return (int)((rect.Y + yAdjustment) * scaleY + yOffset);
         }
 
         private void HandleAim(Prediction closestPrediction)
         {
-            if (Dictionary.toggleState["Aim Assist"] &&
-                (Dictionary.toggleState["Constant AI Tracking"] ||
-                 Dictionary.toggleState["Aim Assist"] && InputBindingManager.IsHoldingBinding("Aim Keybind") ||
-                 Dictionary.toggleState["Aim Assist"] && InputBindingManager.IsHoldingBinding("Second Aim Keybind")))
+            if (_fcAimAssist &&
+                (_fcConstantAiTracking ||
+                 InputBindingManager.IsHoldingBinding("Aim Keybind") ||
+                 InputBindingManager.IsHoldingBinding("Second Aim Keybind")))
             {
-                if (Dictionary.toggleState["Predictions"])
-                {
+                if (_fcPredictions)
                     HandlePredictions(kalmanPrediction, closestPrediction, detectedX, detectedY);
-                }
                 else
-                {
                     MouseManager.MoveCrosshair(detectedX, detectedY);
-                }
             }
         }
 
         private void HandlePredictions(KalmanPrediction kalmanPrediction, Prediction closestPrediction, int detectedX, int detectedY)
         {
-            var predictionMethod = Dictionary.dropdownState["Prediction Method"];
+            var predictionMethod = _fcPredictionMethod;
             switch (predictionMethod)
             {
                 case "Kalman Filter":
@@ -797,27 +819,22 @@ namespace Venkatesh2.AILogic
 
         private Prediction? GetClosestPrediction()
         {
-            if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse")
+            if (_fcClosestToMouse)
             {
-                var mousePos = WinAPICaller.GetCursorPosition();
-
-                // Check if mouse is on the current display
+                var mousePos = _fcMousePos;
                 if (DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
                 {
-                    // Mouse is on current display, use its position
                     targetX = mousePos.X;
                     targetY = mousePos.Y;
                 }
                 else
                 {
-                    // Mouse is on different display, use center of current display
                     targetX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
                     targetY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
                 }
             }
             else
             {
-                // Center of current display
                 targetX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
                 targetY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
             }
@@ -842,10 +859,7 @@ namespace Venkatesh2.AILogic
                     _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
                 }
 
-                // Only materialize a Bitmap when SaveFrame might actually use it; SaveFrame itself
-                // re-checks cooldown + auto-label. DirectX path skips LockBits + row-MemoryCopy when false.
-                bool wantBitmap = Dictionary.toggleState["Collect Data While Playing"];
-                Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, wantBitmap);
+                Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, _fcCollectData);
 
                 if (_onnxModel == null) return null;
                 results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
@@ -858,12 +872,10 @@ namespace Venkatesh2.AILogic
                     return null;
                 }
 
-                // Calculate the FOV boundaries
-                float FovSize = (float)Dictionary.sliderSettings["FOV Size"];
-                float fovMinX = (IMAGE_SIZE - FovSize) / 2.0f;
-                float fovMaxX = (IMAGE_SIZE + FovSize) / 2.0f;
-                float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
-                float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
+                float fovMinX = (IMAGE_SIZE - _fcFovSize) / 2.0f;
+                float fovMaxX = (IMAGE_SIZE + _fcFovSize) / 2.0f;
+                float fovMinY = fovMinX;
+                float fovMaxY = fovMaxX;
 
                 List<Prediction> KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
 
@@ -905,7 +917,7 @@ namespace Venkatesh2.AILogic
 
         private Prediction? HandleStickyAim(Prediction? bestCandidate, List<Prediction> KDPredictions)
         {
-            if (!Dictionary.toggleState["Sticky Aim"])
+            if (!_fcStickyAim)
             {
                 _currentTarget = bestCandidate;
                 ResetStickyAimState();
@@ -986,7 +998,7 @@ namespace Venkatesh2.AILogic
             _framesWithoutMatch++;
 
             // Quick switch if aim target is very close to crosshair (user clearly aiming at it)
-            float stickyThreshold = (float)Dictionary.sliderSettings["Sticky Aim Threshold"];
+            float stickyThreshold = (float)_fcStickyThreshold;
             bool aimTargetVeryCentered = nearestToCrosshairDistSq < (stickyThreshold * stickyThreshold * 0.25f);
 
             if (aimTargetVeryCentered || _framesWithoutMatch >= 3)
@@ -1028,19 +1040,16 @@ namespace Venkatesh2.AILogic
                 // Decay lock score during grace period
                 _targetLockScore *= LOCK_SCORE_DECAY;
 
-                // Return predicted position instead of stale position
-                var predicted = new Prediction
-                {
-                    ScreenCenterX = _currentTarget.ScreenCenterX + _lastTargetVelocityX * _consecutiveFramesWithoutTarget,
-                    ScreenCenterY = _currentTarget.ScreenCenterY + _lastTargetVelocityY * _consecutiveFramesWithoutTarget,
-                    Rectangle = _currentTarget.Rectangle,
-                    Confidence = _currentTarget.Confidence * (1f - _consecutiveFramesWithoutTarget * 0.2f),
-                    ClassId = _currentTarget.ClassId,
-                    ClassName = _currentTarget.ClassName,
-                    CenterXTranslated = _currentTarget.CenterXTranslated,
-                    CenterYTranslated = _currentTarget.CenterYTranslated
-                };
-                return predicted;
+                // Reuse a single Prediction object during grace period — avoids heap allocation each miss frame.
+                _gracePrediction.ScreenCenterX      = _currentTarget.ScreenCenterX + _lastTargetVelocityX * _consecutiveFramesWithoutTarget;
+                _gracePrediction.ScreenCenterY      = _currentTarget.ScreenCenterY + _lastTargetVelocityY * _consecutiveFramesWithoutTarget;
+                _gracePrediction.Rectangle          = _currentTarget.Rectangle;
+                _gracePrediction.Confidence         = _currentTarget.Confidence * (1f - _consecutiveFramesWithoutTarget * 0.2f);
+                _gracePrediction.ClassId            = _currentTarget.ClassId;
+                _gracePrediction.ClassName          = _currentTarget.ClassName;
+                _gracePrediction.CenterXTranslated  = _currentTarget.CenterXTranslated;
+                _gracePrediction.CenterYTranslated  = _currentTarget.CenterYTranslated;
+                return _gracePrediction;
             }
 
             ResetStickyAimState();
@@ -1082,6 +1091,7 @@ namespace Venkatesh2.AILogic
             _lastTargetVelocityX = 0f;
             _lastTargetVelocityY = 0f;
             _targetLockScore = 0f;
+            ShalloePredictionV2.Reset(); // clear velocity history so stale velocity doesn't bleed into next target
         }
 
         private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)
@@ -1097,12 +1107,12 @@ namespace Venkatesh2.AILogic
             Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
         {
-            float minConfidence = (float)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
-            string selectedClass = Dictionary.dropdownState["Target Class"];
-            int selectedClassId = selectedClass == "Best Confidence" ? -1 : _modelClasses.FirstOrDefault(c => c.Value == selectedClass).Key;
+            float minConfidence = _fcMinConfidence;
+            int selectedClassId = _cachedTargetClassId;
 
             int nd = NUM_DETECTIONS;
             int imageSize = IMAGE_SIZE;
+            float invImageSize = 1.0f / imageSize; // precomputed reciprocal — replaces 2 divisions per detected box
             _kdPredictions.Clear();
             var KDpredictions = _kdPredictions;
 
@@ -1174,8 +1184,8 @@ namespace Venkatesh2.AILogic
                         Confidence = bestConfidence,
                         ClassId = bestClassId,
                         ClassName = _modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                        CenterXTranslated = x_center / imageSize,
-                        CenterYTranslated = y_center / imageSize,
+                        CenterXTranslated = x_center * invImageSize,
+                        CenterYTranslated = y_center * invImageSize,
                         ScreenCenterX = detectionBox.Left + x_center,
                         ScreenCenterY = detectionBox.Top + y_center
                     });
@@ -1232,8 +1242,8 @@ namespace Venkatesh2.AILogic
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
                     ClassName = _modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                    CenterXTranslated = x_center / imageSize,
-                    CenterYTranslated = y_center / imageSize,
+                    CenterXTranslated = x_center * invImageSize,
+                    CenterYTranslated = y_center * invImageSize,
                     ScreenCenterX = detectionBox.Left + x_center,
                     ScreenCenterY = detectionBox.Top + y_center
                 });
