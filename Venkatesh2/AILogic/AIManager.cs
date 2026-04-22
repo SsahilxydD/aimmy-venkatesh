@@ -99,26 +99,10 @@ namespace Venkatesh2.AILogic
         private float _scaleX => ScreenWidth / (float)IMAGE_SIZE;
         private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
 
-        // Tensor reuse (model inference). Backing buffers stay pinned via OrtValues below.
+        // Tensor reuse (model inference)
+        private DenseTensor<float>? _reusableTensor;
         private float[]? _reusableInputArray;
-        private float[]? _reusableOutputArray;
-        private DenseTensor<float>? _reusableOutputTensor; // managed view for PrepareKDTreeData
-
-        // IoBinding path — the only reliable way to get DirectML EP to fully populate the
-        // output buffer. The previous Run(inputs, outputs, options) overload with
-        // NamedOnnxValue wrappers was producing *partial* writes (bbox channels populated,
-        // class-score channel all zeros), even though the Run call itself succeeded.
-        // OrtValue.CreateTensorValueFromMemory pins the managed array for the OrtValue's
-        // lifetime, so ORT writes straight into _reusableOutputArray.
-        private OrtIoBinding? _ioBinding;
-        private OrtValue? _inputOrtValue;
-        private OrtValue? _outputOrtValue;
-
-        // Diagnostic heartbeat — verifies inference is producing output and tells us the
-        // confidence distribution so we can tell "inference is silently broken" from
-        // "inference works but no enemies on screen / threshold too high".
-        private long _hbLastTick = 0;
-        private long _hbFrameCounter = 0;
+        private List<NamedOnnxValue>? _reusableInputs;
 
         // Reused per-frame detection list — avoids a new List<Prediction> allocation every inference call.
         private readonly List<Prediction> _kdPredictions = new(32);
@@ -295,24 +279,17 @@ namespace Venkatesh2.AILogic
             }
         }
 
-        // Registers the DirectML EP with settings tuned for a dedicated discrete GPU (e.g. RTX 4070 Super).
-        // ORT 1.23's C# surface only exposes device_id for DML directly, so perf hints are routed
-        // through session config entries — ORT silently ignores keys it doesn't recognize on older
-        // builds, which makes this safe to leave in.
+        // Registers the DirectML EP. deviceId=0 = primary DXGI adapter (high-perf GPU on hybrid).
+        //
+        // DO NOT re-enable ep.dml.enable_graph_capture / enable_dynamic_graph_fusion here.
+        // Those hints cause DML to record the command list on Run 1 and replay it on every
+        // subsequent Run. The replay path did not populate the output buffer on RTX 4070 Super
+        // (tested 2026-04-22): frame 1 produced real output, every subsequent frame returned
+        // zeros. Without graph capture, DML runs the compute path fresh each frame and the
+        // output buffer is populated every time. The perf loss is measured in microseconds;
+        // the correctness loss is total.
         private static void AppendDirectMLProvider(SessionOptions sessionOptions)
         {
-            // Record the DML command list on the first inference and replay it on subsequent
-            // calls. Safe for our workload because input shape is fixed for the lifetime of a session
-            // (IMAGE_SIZE change triggers a full model reload) and _reusableTensor stays pinned.
-            try { sessionOptions.AddSessionConfigEntry("ep.dml.enable_graph_capture", "1"); } catch { }
-            // Subgraph fusion hint for dynamic-shape YOLOv8 exports.
-            try { sessionOptions.AddSessionConfigEntry("ep.dml.enable_dynamic_graph_fusion", "1"); } catch { }
-            // Prefer the highest-performance adapter when DML has to choose between multiple.
-            try { sessionOptions.AddSessionConfigEntry("ep.dml.performance_preference", "high_performance"); } catch { }
-
-            // deviceId=0 is the primary DXGI adapter, which Windows "Graphics Settings" aliases to
-            // the high-performance GPU when one is available. Explicit over implicit so a stale
-            // iGPU doesn't win the pick on hybrid systems.
             sessionOptions.AppendExecutionProvider_DML(0);
         }
 
@@ -371,7 +348,7 @@ namespace Venkatesh2.AILogic
                 foreach (var kvp in inputMetadata)
                 {
                     string dimensionsStr = string.Join("x", kvp.Value.Dimensions);
-                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}, ElementType: {kvp.Value.ElementType?.Name ?? "unknown"}");
+                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
 
                     // Check if model is dynamic (dimensions are -1)
                     if (kvp.Value.Dimensions.Any(d => d == -1))
@@ -389,7 +366,7 @@ namespace Venkatesh2.AILogic
                 foreach (var kvp in outputMetadata)
                 {
                     string dimensionsStr = string.Join("x", kvp.Value.Dimensions);
-                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}, ElementType: {kvp.Value.ElementType?.Name ?? "unknown"}");
+                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
                 }
 
                 IsDynamicModel = isDynamic;
@@ -603,7 +580,7 @@ namespace Venkatesh2.AILogic
                     // Log but never let a frame exception escape and kill the loop.
                     // ObjectDisposedException here means the model was swapped mid-frame;
                     // just skip the frame and the next iteration will see ct cancelled.
-                    LogException("AiLoop", ex);
+                    Log(LogLevel.Error, $"AiLoop frame error: {ex.GetType().Name}: {ex.Message}");
                     try { await Task.Delay(IDLE_DELAY_MS, ct); } catch { break; }
                 }
             }
@@ -893,73 +870,29 @@ namespace Venkatesh2.AILogic
 
             Rectangle detectionBox = new(targetX - IMAGE_SIZE / 2, targetY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE); // Detection box dynamic size
 
+            IDisposableReadOnlyCollection<DisposableNamedOnnxValue>? results = null;
             Tensor<float>? outputTensor = null;
 
             try
             {
-                // (Re)allocate when IMAGE_SIZE, NUM_CLASSES, or NUM_DETECTIONS changes.
-                //
-                // Binding strategy: pin our INPUT array via OrtValue (we populate it from the
-                // captured frame each tick), but let ORT allocate the OUTPUT tensor itself and
-                // copy the result into our managed buffer after each Run. The previous approach
-                // (pinning both with OrtValue.CreateTensorValueFromMemory + BindOutput) wrote
-                // bbox coords on the first Run and then stopped populating any subsequent Run's
-                // output — a pinning-lifetime bug somewhere between Memory<T>.Pin() and the
-                // DirectML EP. BindOutputToDevice sidesteps it entirely.
-                int expectedOutputLen = 1 * (4 + NUM_CLASSES) * NUM_DETECTIONS;
+                // Allocate the input array + DenseTensor once per IMAGE_SIZE. The tensor wraps the
+                // array by reference, so writes to _reusableInputArray update the tensor buffer
+                // directly — no per-frame CopyTo needed.
                 if (_reusableInputArray == null
                     || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE
-                    || _reusableOutputArray == null
-                    || _reusableOutputArray.Length != expectedOutputLen
-                    || _ioBinding == null)
+                    || _reusableTensor == null
+                    || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
                 {
-                    _ioBinding?.Dispose();
-                    _inputOrtValue?.Dispose();
-                    _outputOrtValue?.Dispose();
-                    _outputOrtValue = null;
-
-                    _reusableInputArray  = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
-                    _reusableOutputArray = new float[expectedOutputLen];
-                    _reusableOutputTensor = new DenseTensor<float>(_reusableOutputArray, new int[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS });
-
-                    _inputOrtValue = OrtValue.CreateTensorValueFromMemory(
-                        OrtMemoryInfo.DefaultInstance,
-                        _reusableInputArray.AsMemory(),
-                        new long[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
-
-                    string outName = (_outputNames != null && _outputNames.Count > 0) ? _outputNames[0] : "output0";
-                    _ioBinding = _onnxModel!.CreateIoBinding();
-                    _ioBinding.BindInput("images", _inputOrtValue);
-                    _ioBinding.BindOutputToDevice(outName, OrtMemoryInfo.DefaultInstance);
+                    _reusableInputArray = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
+                    _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+                    _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
                 }
 
                 Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, _fcCollectData);
 
-                if (_onnxModel == null || _ioBinding == null) return null;
-
-                _onnxModel.RunWithBinding(_modeloptions, _ioBinding);
-                _ioBinding.SynchronizeBoundOutputs(); // wait for GPU→CPU transfer
-
-                // Copy ORT's allocated output into our managed buffer so downstream code
-                // (PrepareKDTreeData) can read _reusableOutputTensor as before.
-                using (var outputs = _ioBinding.GetOutputValues())
-                {
-                    var ortOut = outputs.ElementAt(0);
-                    var span = ortOut.GetTensorDataAsSpan<float>();
-                    if (span.Length == _reusableOutputArray!.Length)
-                    {
-                        span.CopyTo(_reusableOutputArray);
-                    }
-                    else
-                    {
-                        // Mismatch should be impossible given the static shape, but guard anyway.
-                        int n = Math.Min(span.Length, _reusableOutputArray.Length);
-                        span.Slice(0, n).CopyTo(_reusableOutputArray.AsSpan(0, n));
-                    }
-                }
-                outputTensor = _reusableOutputTensor;
-
-                LogInferenceHeartbeat();
+                if (_onnxModel == null) return null;
+                results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
+                outputTensor = results[0].AsTensor<float>();
 
                 if (outputTensor == null)
                 {
@@ -1007,7 +940,7 @@ namespace Venkatesh2.AILogic
             finally
             {
                 // Bitmap is owned and reused by CaptureManager — do not dispose it here.
-                // No disposable result to clean up: pre-allocated outputs are reused every frame.
+                results?.Dispose();
             }
         }
 
@@ -1350,89 +1283,6 @@ namespace Venkatesh2.AILogic
 
         #endregion AI Loop Functions
 
-        // Logs one line every ~3 seconds with inference stats. Cheap enough to leave on;
-        // doubles as proof the hot path is actually running.
-        private void LogInferenceHeartbeat()
-        {
-            _hbFrameCounter++;
-            long now = Environment.TickCount64;
-            if (now - _hbLastTick < 3000) return;
-            _hbLastTick = now;
-
-            if (_reusableOutputArray == null) { Log(LogLevel.Info, "[hb] output array is null"); return; }
-            if (_reusableInputArray == null)  { Log(LogLevel.Info, "[hb] input array is null"); return; }
-
-            // Input-buffer scan — if this stays at 0/0, CaptureForInference never wrote to it
-            // and inference is running on an all-zero tensor (producing the same deterministic
-            // YOLO output every frame regardless of what's on screen).
-            int inNonZero = 0;
-            float inMax = 0f;
-            for (int i = 0; i < _reusableInputArray.Length; i++)
-            {
-                float v = _reusableInputArray[i];
-                if (v != 0f) inNonZero++;
-                float a = Math.Abs(v);
-                if (a > inMax) inMax = a;
-            }
-
-            int stride = 4 + NUM_CLASSES;
-
-            // Layout A: [1, C, A] — channel-major (what the metadata claims)
-            //   bbox: indices 0 .. 4*A-1
-            //   conf: indices 4*A .. (4+K)*A-1
-            int classStartA = 4 * NUM_DETECTIONS;
-            int classEndA   = (4 + NUM_CLASSES) * NUM_DETECTIONS;
-
-            float bboxMaxA = 0f;
-            for (int i = 0; i < classStartA && i < _reusableOutputArray.Length; i++)
-            {
-                float a = Math.Abs(_reusableOutputArray[i]);
-                if (a > bboxMaxA) bboxMaxA = a;
-            }
-
-            float classMaxA = 0f;
-            int aboveHalfA = 0;
-            for (int i = classStartA; i < classEndA && i < _reusableOutputArray.Length; i++)
-            {
-                float c = _reusableOutputArray[i];
-                if (c > classMaxA) classMaxA = c;
-                if (c > 0.5f) aboveHalfA++;
-            }
-
-            // Layout B: [1, A, C] — anchor-major (each anchor is 5 consecutive floats)
-            //   conf for anchor a is at index a*stride + 4 (for 4 bbox + 1 class)
-            float classMaxB = 0f;
-            int aboveHalfB = 0;
-            for (int a = 0; a < NUM_DETECTIONS && (a * stride + stride - 1) < _reusableOutputArray.Length; a++)
-            {
-                for (int c = 0; c < NUM_CLASSES; c++)
-                {
-                    float v = _reusableOutputArray[a * stride + 4 + c];
-                    if (v > classMaxB) classMaxB = v;
-                    if (v > 0.5f) aboveHalfB++;
-                }
-            }
-
-            // Non-zero count across the whole buffer — 0 means ORT literally wrote nothing this frame.
-            int nonZero = 0;
-            for (int i = 0; i < _reusableOutputArray.Length; i++)
-                if (_reusableOutputArray[i] != 0f) nonZero++;
-
-            double conf = Convert.ToDouble(Dictionary.sliderSettings["AI Minimum Confidence"]) / 100.0;
-            bool aimHeld = InputLogic.InputBindingManager.IsHoldingBinding("Aim Keybind")
-                        || InputLogic.InputBindingManager.IsHoldingBinding("Second Aim Keybind");
-
-            string sample = $"[{_reusableOutputArray[0]:F3}, {_reusableOutputArray[1]:F3}, {_reusableOutputArray[2]:F3}, {_reusableOutputArray[3]:F3}, {_reusableOutputArray[4]:F3}]";
-
-            Log(LogLevel.Info,
-                $"[hb] frames={_hbFrameCounter} " +
-                $"INPUT(nonZero={inNonZero}/{_reusableInputArray.Length} max={inMax:F3}) " +
-                $"OUT(nonZero={nonZero}/{_reusableOutputArray.Length} " +
-                $"bboxMax={bboxMaxA:F2} classMax={classMaxA:F3} above0.5={aboveHalfA}) " +
-                $"first5={sample} threshold={conf:F2} aimHeld={aimHeld} " +
-                $"aimAssist={_fcAimAssist} showPlayer={_fcShowDetectedPlayer} autoTrig={_fcAutoTrigger}");
-        }
-
         #endregion AI
 
         #region Screen Capture
@@ -1506,15 +1356,8 @@ namespace Venkatesh2.AILogic
             _captureManager.Dispose();
 
             // Clean up other resources
-            _ioBinding?.Dispose();
-            _ioBinding = null;
-            _inputOrtValue?.Dispose();
-            _inputOrtValue = null;
-            _outputOrtValue?.Dispose();
-            _outputOrtValue = null;
             _reusableInputArray = null;
-            _reusableOutputArray = null;
-            _reusableOutputTensor = null;
+            _reusableInputs = null;
             _onnxModel?.Dispose();
             _onnxModel = null;
             _modeloptions?.Dispose();
