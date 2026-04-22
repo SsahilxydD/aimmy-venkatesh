@@ -68,8 +68,11 @@ namespace Venkatesh2.AILogic
         private readonly RunOptions? _modeloptions;
         private InferenceSession? _onnxModel;
 
-        private Thread? _aiLoopThread;
-        private volatile bool _isAiLoopRunning;
+        // CancellationTokenSource drives the async loop lifecycle.
+        // Unlike a volatile bool + Thread.Join, cancelling the token wakes any
+        // Task.Delay inside the loop immediately and propagates through async continuations.
+        private CancellationTokenSource? _loopCts;
+        private Task? _loopTask;
 
         // Sticky-Aim
         private Prediction? _currentTarget = null;
@@ -229,30 +232,51 @@ namespace Venkatesh2.AILogic
 
         private async Task InitializeModel(string modelPath)
         {
+            string originalPath = modelPath;
             string resolved = ResolveFp16Path(modelPath);
-            if (!string.Equals(resolved, modelPath, StringComparison.OrdinalIgnoreCase))
-                Log(LogLevel.Info, $"FP16 model found — using {Path.GetFileName(resolved)} for faster inference.");
-            modelPath = resolved;
+            bool usingFp16 = !string.Equals(resolved, originalPath, StringComparison.OrdinalIgnoreCase);
 
+            if (usingFp16)
+                Log(LogLevel.Info, $"FP16 model found — using {Path.GetFileName(resolved)} for faster inference.");
+
+            // Attempt 1: FP16 (or original) via DirectML
+            if (await TryLoadModel(resolved, useDirectML: true))
+            { FileManager.CurrentlyLoadingModel = false; return; }
+
+            // Attempt 2: same model via CPU
+            if (await TryLoadModel(resolved, useDirectML: false))
+            { FileManager.CurrentlyLoadingModel = false; return; }
+
+            // Attempt 3: if we were using FP16 and both EPs failed, try the original FP32 via DirectML
+            if (usingFp16)
+            {
+                Log(LogLevel.Warning, "FP16 model failed on all providers — retrying with original FP32 model.", true);
+                if (await TryLoadModel(originalPath, useDirectML: true))
+                { FileManager.CurrentlyLoadingModel = false; return; }
+
+                // Attempt 4: original FP32 via CPU
+                if (await TryLoadModel(originalPath, useDirectML: false))
+                { FileManager.CurrentlyLoadingModel = false; return; }
+            }
+
+            Log(LogLevel.Error, "All model loading attempts failed. Aim assist will not work.", true);
+            FileManager.CurrentlyLoadingModel = false;
+        }
+
+        // Returns true if the model loaded and the loop started successfully.
+        private async Task<bool> TryLoadModel(string modelPath, bool useDirectML)
+        {
             try
             {
-                await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML: true);
+                await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML);
+                return _loopTask != null; // loop was started inside LoadModelAsync on success
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, $"Error starting the model via DirectML: {ex.Message}\n\nFalling back to CPU, performance may be poor.", true);
-
-                try
-                {
-                    await LoadModelAsync(BuildSessionOptions(), modelPath, useDirectML: false);
-                }
-                catch (Exception e)
-                {
-                    Log(LogLevel.Error, $"Error starting the model via CPU: {e.Message}, you won't be able to aim assist at all.", true);
-                }
+                string ep = useDirectML ? "DirectML" : "CPU";
+                Log(LogLevel.Error, $"Model load via {ep} failed: {ex.Message}");
+                return false;
             }
-
-            FileManager.CurrentlyLoadingModel = false;
         }
 
         // Registers the DirectML EP with settings tuned for a dedicated discrete GPU (e.g. RTX 4070 Super).
@@ -307,14 +331,11 @@ namespace Venkatesh2.AILogic
                 return Task.CompletedTask;
             }
 
-            // Begin the loop
-            _isAiLoopRunning = true;
-            _aiLoopThread = new Thread(AiLoop)
-            {
-                IsBackground = true,
-                Priority = ThreadPriority.AboveNormal // Higher priority for AI thread
-            };
-            _aiLoopThread.Start();
+            // Start the AI loop as an awaitable Task so cancellation propagates through
+            // all async continuations. Thread.Join only waited for the first synchronous
+            // segment; now _loopTask.Wait() in Dispose waits for the entire async chain.
+            _loopCts = new CancellationTokenSource();
+            _loopTask = Task.Run(() => AiLoop(_loopCts.Token));
             return Task.CompletedTask;
         }
 
@@ -500,59 +521,74 @@ namespace Venkatesh2.AILogic
         // Sleep this long when nothing is happening — keeps CPU near-idle
         private const int IDLE_DELAY_MS = 33;
 
-        private async void AiLoop()
+        private async Task AiLoop(CancellationToken ct)
         {
             Stopwatch frameTimer = new();
 
-            while (_isAiLoopRunning)
+            while (!ct.IsCancellationRequested)
             {
-                lock (_sizeLock)
+                try
                 {
-                    if (_sizeChangePending) continue;
+                    // Yield pending display changes before anything else.
+                    lock (_sizeLock)
+                    {
+                        if (_sizeChangePending)
+                        {
+                            // Size change pending — wait briefly and retry.
+                            // Do NOT spin; sleep so the CPU is free for the UI thread.
+                            Task.Delay(5, ct).Wait(ct);
+                            continue;
+                        }
+                    }
+
+                    frameTimer.Restart();
+                    RefreshFrameCache();
+                    _captureManager.HandlePendingDisplayChanges();
+                    UpdateFOV();
+
+                    if (!ShouldProcess())
+                    {
+                        await Task.Delay(IDLE_DELAY_MS, ct);
+                        continue;
+                    }
+
+                    if (!ShouldPredict())
+                    {
+                        await Task.Delay(IDLE_DELAY_MS, ct);
+                        continue;
+                    }
+
+                    Prediction? closestPrediction = GetClosestPrediction();
+                    DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
+
+                    if (closestPrediction == null)
+                    {
+                        DisableOverlay(DetectedPlayerOverlay);
+                    }
+                    else
+                    {
+                        await AutoTrigger();
+                        CalculateCoordinates(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
+                        HandleAim(closestPrediction);
+                    }
+
+                    // FPS cap: sleep the remainder of the frame budget.
+                    double elapsed = frameTimer.Elapsed.TotalMilliseconds;
+                    int remaining = (int)(TARGET_FRAME_MS - elapsed);
+                    if (remaining > 0)
+                        await Task.Delay(remaining, ct);
                 }
-
-                frameTimer.Restart();
-
-                // Snapshot all Dictionary reads for this frame — one hash lookup per key instead of many.
-                RefreshFrameCache();
-
-                _captureManager.HandlePendingDisplayChanges();
-
-                UpdateFOV();
-
-                if (!ShouldProcess())
+                catch (OperationCanceledException)
                 {
-                    await Task.Delay(IDLE_DELAY_MS);
-                    continue;
+                    break; // Clean shutdown — cancellation requested.
                 }
-
-                if (!ShouldPredict())
+                catch (Exception ex)
                 {
-                    // Ready state — processing enabled but no aim key held
-                    await Task.Delay(IDLE_DELAY_MS);
-                    continue;
-                }
-
-                Prediction? closestPrediction = GetClosestPrediction();
-                DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
-
-                if (closestPrediction == null)
-                {
-                    DisableOverlay(DetectedPlayerOverlay);
-                }
-                else
-                {
-                    await AutoTrigger();
-                    CalculateCoordinates(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
-                    HandleAim(closestPrediction);
-                }
-
-                // FPS cap: sleep the remainder of the frame budget
-                double elapsed = frameTimer.Elapsed.TotalMilliseconds;
-                int remaining = (int)(TARGET_FRAME_MS - elapsed);
-                if (remaining > 0)
-                {
-                    await Task.Delay(remaining);
+                    // Log but never let a frame exception escape and kill the loop.
+                    // ObjectDisposedException here means the model was swapped mid-frame;
+                    // just skip the frame and the next iteration will see ct cancelled.
+                    Log(LogLevel.Error, $"AiLoop frame error: {ex.GetType().Name}: {ex.Message}");
+                    try { await Task.Delay(IDLE_DELAY_MS, ct); } catch { break; }
                 }
             }
         }
@@ -605,23 +641,26 @@ namespace Venkatesh2.AILogic
                 MouseManager.ResetSprayState();
         }
 
-        private async void UpdateFOV()
+        private void UpdateFOV()
         {
-            if (_fcClosestToMouse && _fcFovEnabled)
+            if (!_fcClosestToMouse || !_fcFovEnabled) return;
+            if (Dictionary.FOVWindow == null) return;
+
+            var mousePosition = _fcMousePos;
+            if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePosition.X, mousePosition.Y)))
+                return;
+
+            var displayRelativeX = mousePosition.X - DisplayManager.ScreenLeft;
+            var displayRelativeY = mousePosition.Y - DisplayManager.ScreenTop;
+
+            // BeginInvoke is fire-and-forget on the UI thread — no await needed.
+            Application.Current.Dispatcher.BeginInvoke(() =>
             {
-                var mousePosition = _fcMousePos;
-
-                if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePosition.X, mousePosition.Y)))
-                    return;
-
-                var displayRelativeX = mousePosition.X - DisplayManager.ScreenLeft;
-                var displayRelativeY = mousePosition.Y - DisplayManager.ScreenTop;
-
-                await Application.Current.Dispatcher.BeginInvoke(() =>
-                    Dictionary.FOVWindow!.FOVStrictEnclosure.Margin = new Thickness(
-                        Convert.ToInt16(displayRelativeX / WinAPICaller.scalingFactorX) - 320, // this is based off the window size, not the size of the model -whip
-                        Convert.ToInt16(displayRelativeY / WinAPICaller.scalingFactorY) - 320, 0, 0));
-            }
+                if (Dictionary.FOVWindow == null) return;
+                Dictionary.FOVWindow.FOVStrictEnclosure.Margin = new Thickness(
+                    Convert.ToInt16(displayRelativeX / WinAPICaller.scalingFactorX) - 320,
+                    Convert.ToInt16(displayRelativeY / WinAPICaller.scalingFactorY) - 320, 0, 0);
+            });
         }
 
         private static void DisableOverlay(DetectedPlayerWindow? DetectedPlayerOverlay)
@@ -1308,22 +1347,17 @@ namespace Venkatesh2.AILogic
 
         public void Dispose()
         {
-            // Signal that we're shutting down
-            lock (_sizeLock)
-            {
-                _sizeChangePending = true;
-            }
+            // Cancel the token — wakes any Task.Delay in the loop immediately and propagates
+            // through all async continuations, so _loopTask.Wait() below actually waits for
+            // the ENTIRE async chain, not just the synchronous preamble before the first await.
+            _loopCts?.Cancel();
 
-            // Stop the loop
-            _isAiLoopRunning = false;
-            if (_aiLoopThread != null && _aiLoopThread.IsAlive)
-            {
-                if (!_aiLoopThread.Join(TimeSpan.FromSeconds(1)))
-                {
-                    try { _aiLoopThread.Interrupt(); }
-                    catch { }
-                }
-            }
+            // Wait up to 2 s for the loop to finish its current frame and exit cleanly.
+            // Exceptions from cancellation are expected; suppress them.
+            try { _loopTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
+
+            _loopCts?.Dispose();
+            _loopCts = null;
 
             // Dispose DXGI objects
             _captureManager.Dispose();
@@ -1332,6 +1366,7 @@ namespace Venkatesh2.AILogic
             _reusableInputArray = null;
             _reusableInputs = null;
             _onnxModel?.Dispose();
+            _onnxModel = null;
             _modeloptions?.Dispose();
         }
     }
