@@ -897,9 +897,15 @@ namespace Venkatesh2.AILogic
 
             try
             {
-                // (Re)allocate when IMAGE_SIZE, NUM_CLASSES, or NUM_DETECTIONS changes. Each
-                // change recreates the managed arrays AND the OrtValues that pin them,
-                // AND the IoBinding that ties them to the session.
+                // (Re)allocate when IMAGE_SIZE, NUM_CLASSES, or NUM_DETECTIONS changes.
+                //
+                // Binding strategy: pin our INPUT array via OrtValue (we populate it from the
+                // captured frame each tick), but let ORT allocate the OUTPUT tensor itself and
+                // copy the result into our managed buffer after each Run. The previous approach
+                // (pinning both with OrtValue.CreateTensorValueFromMemory + BindOutput) wrote
+                // bbox coords on the first Run and then stopped populating any subsequent Run's
+                // output — a pinning-lifetime bug somewhere between Memory<T>.Pin() and the
+                // DirectML EP. BindOutputToDevice sidesteps it entirely.
                 int expectedOutputLen = 1 * (4 + NUM_CLASSES) * NUM_DETECTIONS;
                 if (_reusableInputArray == null
                     || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE
@@ -907,10 +913,10 @@ namespace Venkatesh2.AILogic
                     || _reusableOutputArray.Length != expectedOutputLen
                     || _ioBinding == null)
                 {
-                    // Dispose old OrtValues/binding before swapping the underlying buffers.
                     _ioBinding?.Dispose();
                     _inputOrtValue?.Dispose();
                     _outputOrtValue?.Dispose();
+                    _outputOrtValue = null;
 
                     _reusableInputArray  = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
                     _reusableOutputArray = new float[expectedOutputLen];
@@ -921,32 +927,38 @@ namespace Venkatesh2.AILogic
                         _reusableInputArray.AsMemory(),
                         new long[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
 
-                    _outputOrtValue = OrtValue.CreateTensorValueFromMemory(
-                        OrtMemoryInfo.DefaultInstance,
-                        _reusableOutputArray.AsMemory(),
-                        new long[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS });
-
                     string outName = (_outputNames != null && _outputNames.Count > 0) ? _outputNames[0] : "output0";
                     _ioBinding = _onnxModel!.CreateIoBinding();
                     _ioBinding.BindInput("images", _inputOrtValue);
-                    _ioBinding.BindOutput(outName, _outputOrtValue);
+                    _ioBinding.BindOutputToDevice(outName, OrtMemoryInfo.DefaultInstance);
                 }
 
                 Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, _fcCollectData);
 
                 if (_onnxModel == null || _ioBinding == null) return null;
 
-                // Zero the output buffer each frame so the heartbeat can tell "ORT touched this
-                // region" from "leftover data from a previous frame". Cheap on 42k floats.
-                Array.Clear(_reusableOutputArray!, 0, _reusableOutputArray!.Length);
-
-                // RunWithBinding — the canonical path for pre-allocated outputs on DirectML EP.
-                // ORT writes straight into _reusableOutputArray (pinned by _outputOrtValue).
                 _onnxModel.RunWithBinding(_modeloptions, _ioBinding);
+                _ioBinding.SynchronizeBoundOutputs(); // wait for GPU→CPU transfer
+
+                // Copy ORT's allocated output into our managed buffer so downstream code
+                // (PrepareKDTreeData) can read _reusableOutputTensor as before.
+                using (var outputs = _ioBinding.GetOutputValues())
+                {
+                    var ortOut = outputs.ElementAt(0);
+                    var span = ortOut.GetTensorDataAsSpan<float>();
+                    if (span.Length == _reusableOutputArray!.Length)
+                    {
+                        span.CopyTo(_reusableOutputArray);
+                    }
+                    else
+                    {
+                        // Mismatch should be impossible given the static shape, but guard anyway.
+                        int n = Math.Min(span.Length, _reusableOutputArray.Length);
+                        span.Slice(0, n).CopyTo(_reusableOutputArray.AsSpan(0, n));
+                    }
+                }
                 outputTensor = _reusableOutputTensor;
 
-                // Diagnostic heartbeat — proves inference ran AND the pre-allocated output
-                // was actually populated by ORT (vs. silently returned as zeros).
                 LogInferenceHeartbeat();
 
                 if (outputTensor == null)
