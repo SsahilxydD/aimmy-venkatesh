@@ -104,6 +104,15 @@ namespace Venkatesh2.AILogic
         private float[]? _reusableInputArray;
         private List<NamedOnnxValue>? _reusableInputs;
 
+        // Pre-allocated output tensor. Used with the Run(inputs, outputs, options) overload —
+        // the void-return overload avoids DisposableNamedOnnxValue.CreateFromOrtValue, which
+        // throws "OnnxValueType : ONNX_TYPE_UNKNOWN is not supported" on the DirectML EP when
+        // ORT can't resolve the output OrtValue's type metadata. Pre-binding a typed buffer
+        // side-steps the type lookup entirely — ORT writes straight into _reusableOutputArray.
+        private DenseTensor<float>? _reusableOutputTensor;
+        private float[]? _reusableOutputArray;
+        private List<NamedOnnxValue>? _reusableOutputs;
+
         // Reused per-frame detection list — avoids a new List<Prediction> allocation every inference call.
         private readonly List<Prediction> _kdPredictions = new(32);
 
@@ -877,7 +886,6 @@ namespace Venkatesh2.AILogic
 
             Rectangle detectionBox = new(targetX - IMAGE_SIZE / 2, targetY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE); // Detection box dynamic size
 
-            IDisposableReadOnlyCollection<DisposableNamedOnnxValue>? results = null;
             Tensor<float>? outputTensor = null;
 
             try
@@ -885,21 +893,31 @@ namespace Venkatesh2.AILogic
                 // Allocate the input array + DenseTensor once per IMAGE_SIZE. The tensor wraps the
                 // array by reference, so writes to _reusableInputArray update the tensor buffer
                 // directly — no per-frame CopyTo needed.
+                int expectedOutputLen = 1 * (4 + NUM_CLASSES) * NUM_DETECTIONS;
                 if (_reusableInputArray == null
                     || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE
                     || _reusableTensor == null
-                    || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+                    || _reusableTensor.Dimensions[2] != IMAGE_SIZE
+                    || _reusableOutputArray == null
+                    || _reusableOutputArray.Length != expectedOutputLen)
                 {
                     _reusableInputArray = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
                     _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
                     _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
+
+                    _reusableOutputArray = new float[expectedOutputLen];
+                    _reusableOutputTensor = new DenseTensor<float>(_reusableOutputArray, new int[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS });
+                    string outName = (_outputNames != null && _outputNames.Count > 0) ? _outputNames[0] : "output0";
+                    _reusableOutputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(outName, _reusableOutputTensor) };
                 }
 
                 Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, _fcCollectData);
 
-                if (_onnxModel == null) return null;
-                results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
-                outputTensor = results[0].AsTensor<float>();
+                if (_onnxModel == null || _reusableInputs == null || _reusableOutputs == null) return null;
+
+                // Void-return overload — ORT writes into our pre-allocated _reusableOutputArray.
+                _onnxModel.Run(_reusableInputs, _reusableOutputs, _modeloptions);
+                outputTensor = _reusableOutputTensor;
 
                 if (outputTensor == null)
                 {
@@ -947,7 +965,7 @@ namespace Venkatesh2.AILogic
             finally
             {
                 // Bitmap is owned and reused by CaptureManager — do not dispose it here.
-                results?.Dispose();
+                // No disposable result to clean up: pre-allocated outputs are reused every frame.
             }
         }
 
@@ -1365,6 +1383,9 @@ namespace Venkatesh2.AILogic
             // Clean up other resources
             _reusableInputArray = null;
             _reusableInputs = null;
+            _reusableOutputArray = null;
+            _reusableOutputs = null;
+            _reusableOutputTensor = null;
             _onnxModel?.Dispose();
             _onnxModel = null;
             _modeloptions?.Dispose();
