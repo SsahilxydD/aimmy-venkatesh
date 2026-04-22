@@ -448,7 +448,7 @@ namespace AILogic
                         CopyPixelOperation.SourceCopy
                     );
 
-                    if (Dictionary.toggleState["Third Person Support"])
+                    if (Convert.ToBoolean(Dictionary.toggleState["Third Person Support"]))
                     {
                         int width = screenCaptureBitmap.Width / 2;
                         int height = screenCaptureBitmap.Height / 2;
@@ -475,7 +475,7 @@ namespace AILogic
         // When wantBitmap is false the DirectX path skips materializing a managed Bitmap entirely.
         public Bitmap? CaptureForInference(Rectangle detectionBox, float[] floatDest, int imageSize, bool wantBitmap)
         {
-            string selectedMethod = Dictionary.dropdownState["Screen Capture Method"];
+            string selectedMethod = Convert.ToString(Dictionary.dropdownState["Screen Capture Method"]) ?? "DirectX";
 
             if (_directXFailedPermanently && selectedMethod == "DirectX")
             {
@@ -496,7 +496,7 @@ namespace AILogic
                 else InitializeDxgiDuplication();
             }
 
-            bool applyMask = Dictionary.toggleState["Third Person Support"];
+            bool applyMask = Convert.ToBoolean(Dictionary.toggleState["Third Person Support"]);
 
             if (selectedMethod == "DirectX" && !_directXFailedPermanently)
             {

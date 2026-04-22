@@ -61,7 +61,7 @@ namespace InputLogic
         {
             bool _op = _opP();
             uint _jk = unchecked((uint)Environment.TickCount ^ 0xF1C2A3B4u) & 0u; _ = _jk;
-            string _mm = Dictionary.dropdownState["Mouse Movement Method"];
+            string _mm = Convert.ToString(Dictionary.dropdownState["Mouse Movement Method"]) ?? "Mouse Event";
             int _st = 0;
 
             // Return cached pair without allocation when method hasn't changed.
@@ -98,7 +98,7 @@ namespace InputLogic
             bool _op = _opP();
             uint _jv = unchecked((uint)(_x ^ _y)) & 0u; _ = _jv;
 
-            string _mm = Dictionary.dropdownState["Mouse Movement Method"];
+            string _mm = Convert.ToString(Dictionary.dropdownState["Mouse Movement Method"]) ?? "Mouse Event";
             if (_mm != _cachedDispMM)
             {
                 _cachedDispMM = _mm;
@@ -133,9 +133,9 @@ namespace InputLogic
                 return;
             }
 
-            if (Dictionary.toggleState["Spray Mode"])
+            if (Convert.ToBoolean(Dictionary.toggleState["Spray Mode"]))
             {
-                if (Dictionary.toggleState["Cursor Check"])
+                if (Convert.ToBoolean(Dictionary.toggleState["Cursor Check"]))
                 {
                     Point _mp = WinAPICaller.GetCursorPosition();
                     if (_db.HasValue && !_db.Value.Contains(_mp.X, _mp.Y))
@@ -151,7 +151,7 @@ namespace InputLogic
             // TickCount64 in ms — replaces DateTime.UtcNow subtraction (syscall).
             long _now = Environment.TickCount64;
             int _tsl = _lCT == 0 ? int.MaxValue : (int)(_now - _lCT);
-            int _tdm = (int)(Dictionary.sliderSettings["Auto Trigger Delay"] * 1000);
+            int _tdm = (int)(Convert.ToDouble(Dictionary.sliderSettings["Auto Trigger Delay"]) * 1000);
 
             int _cd = 15 + _rng.Next(0, 14);
 
@@ -205,7 +205,7 @@ namespace InputLogic
             double _tY = _dY - _sH / 2.0;
             double _ar = _sW / _sH;
 
-            double _jS = Dictionary.sliderSettings["Mouse Jitter"];
+            double _jS = Convert.ToDouble(Dictionary.sliderSettings["Mouse Jitter"]);
             double _jX = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
             double _jY = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
 
@@ -214,7 +214,7 @@ namespace InputLogic
             Point _nP = new(0, 0);
 
             // Refresh cached path index if setting changed.
-            string _mp = Dictionary.dropdownState["Movement Path"];
+            string _mp = Convert.ToString(Dictionary.dropdownState["Movement Path"]) ?? "Lerp";
             if (_mp != _cachedPath)
             {
                 _cachedPath = _mp;
@@ -239,29 +239,29 @@ namespace InputLogic
                     case 1:
                         Point _c1 = new(_s.X + (_e.X - _s.X) / 3, _s.Y + (_e.Y - _s.Y) / 3);
                         Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3, _s.Y + 2 * (_e.Y - _s.Y) / 3);
-                        _nP = MovementPaths.CubicBezier(_s, _e, _c1, _c2, 1.0 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
+                        _nP = MovementPaths.CubicBezier(_s, _e, _c1, _c2, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
                         _st = 10; break;
 
                     case 2:
-                        _nP = MovementPaths.Lerp(_s, _e, 1.0 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
+                        _nP = MovementPaths.Lerp(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
                         _st = 10; break;
 
                     case 3:
-                        _nP = MovementPaths.Exponential(_s, _e, 1.0 - (Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]) - 0.2, 3.0);
+                        _nP = MovementPaths.Exponential(_s, _e, 1.0 - (Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"])) - 0.2, 3.0);
                         _st = 10; break;
 
                     case 4:
-                        _nP = MovementPaths.Adaptive(_s, _e, 1.0 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
+                        _nP = MovementPaths.Adaptive(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
                         _st = 10; break;
 
                     case 5:
-                        _nP = MovementPaths.PerlinNoise(_s, _e, 1.0 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"], 20, 0.5);
+                        _nP = MovementPaths.PerlinNoise(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]), 20, 0.5);
                         _st = 10; break;
 
                     case 6:
                         // VelocityDamped: PD controller — faster initial response + brakes near target.
                         // Reaches aim point in fewer frames than Lerp at the same sensitivity setting.
-                        _nP = MovementPaths.VelocityDamped(_e, Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
+                        _nP = MovementPaths.VelocityDamped(_e, Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
                         _st = 10; break;
 
                     case 7:
@@ -304,7 +304,7 @@ namespace InputLogic
                     case 99:
                         _pvX = _nP.X;
                         _pvY = _nP.Y;
-                        if (!Dictionary.toggleState["Auto Trigger"]) ResetSprayState();
+                        if (!Convert.ToBoolean(Dictionary.toggleState["Auto Trigger"])) ResetSprayState();
                         return;
                 }
             }
