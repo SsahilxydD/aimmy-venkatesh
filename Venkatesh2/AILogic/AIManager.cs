@@ -141,34 +141,34 @@ namespace Venkatesh2.AILogic
 
         private void RefreshFrameCache()
         {
-            _fcAimAssist          = Dictionary.toggleState["Aim Assist"];
-            _fcShowDetectedPlayer  = Dictionary.toggleState["Show Detected Player"];
-            _fcConstantAiTracking  = Dictionary.toggleState["Constant AI Tracking"];
-            _fcPredictions         = Dictionary.toggleState["Predictions"];
-            _fcStickyAim           = Dictionary.toggleState["Sticky Aim"];
-            _fcAutoTrigger         = Dictionary.toggleState["Auto Trigger"];
-            _fcSprayMode           = Dictionary.toggleState["Spray Mode"];
-            _fcCursorCheck         = Dictionary.toggleState["Cursor Check"];
-            _fcXAxisPct            = Dictionary.toggleState["X Axis Percentage Adjustment"];
-            _fcYAxisPct            = Dictionary.toggleState["Y Axis Percentage Adjustment"];
-            _fcCollectData         = Dictionary.toggleState["Collect Data While Playing"];
-            _fcFovEnabled          = Dictionary.toggleState["FOV"];
-            _fcFovSize             = (float)(double)Dictionary.sliderSettings["FOV Size"];
-            _fcMinConfidence       = (float)(double)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
-            _fcYOffset             = Dictionary.sliderSettings["Y Offset (Up/Down)"];
-            _fcXOffset             = Dictionary.sliderSettings["X Offset (Left/Right)"];;
-            _fcYOffsetPct          = Dictionary.sliderSettings["Y Offset (%)"];
-            _fcXOffsetPct          = Dictionary.sliderSettings["X Offset (%)"];
-            _fcStickyThreshold     = Dictionary.sliderSettings["Sticky Aim Threshold"];
-            _fcAimingAlignment     = Dictionary.dropdownState["Aiming Boundaries Alignment"];
-            _fcPredictionMethod    = Dictionary.dropdownState["Prediction Method"];
-            _fcClosestToMouse      = (string)Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse";
+            _fcAimAssist           = Convert.ToBoolean(Dictionary.toggleState["Aim Assist"]);
+            _fcShowDetectedPlayer  = Convert.ToBoolean(Dictionary.toggleState["Show Detected Player"]);
+            _fcConstantAiTracking  = Convert.ToBoolean(Dictionary.toggleState["Constant AI Tracking"]);
+            _fcPredictions         = Convert.ToBoolean(Dictionary.toggleState["Predictions"]);
+            _fcStickyAim           = Convert.ToBoolean(Dictionary.toggleState["Sticky Aim"]);
+            _fcAutoTrigger         = Convert.ToBoolean(Dictionary.toggleState["Auto Trigger"]);
+            _fcSprayMode           = Convert.ToBoolean(Dictionary.toggleState["Spray Mode"]);
+            _fcCursorCheck         = Convert.ToBoolean(Dictionary.toggleState["Cursor Check"]);
+            _fcXAxisPct            = Convert.ToBoolean(Dictionary.toggleState["X Axis Percentage Adjustment"]);
+            _fcYAxisPct            = Convert.ToBoolean(Dictionary.toggleState["Y Axis Percentage Adjustment"]);
+            _fcCollectData         = Convert.ToBoolean(Dictionary.toggleState["Collect Data While Playing"]);
+            _fcFovEnabled          = Convert.ToBoolean(Dictionary.toggleState["FOV"]);
+            _fcFovSize             = Convert.ToSingle(Dictionary.sliderSettings["FOV Size"]);
+            _fcMinConfidence       = Convert.ToSingle(Dictionary.sliderSettings["AI Minimum Confidence"]) / 100.0f;
+            _fcYOffset             = Convert.ToDouble(Dictionary.sliderSettings["Y Offset (Up/Down)"]);
+            _fcXOffset             = Convert.ToDouble(Dictionary.sliderSettings["X Offset (Left/Right)"]);
+            _fcYOffsetPct          = Convert.ToDouble(Dictionary.sliderSettings["Y Offset (%)"]);
+            _fcXOffsetPct          = Convert.ToDouble(Dictionary.sliderSettings["X Offset (%)"]);
+            _fcStickyThreshold     = Convert.ToDouble(Dictionary.sliderSettings["Sticky Aim Threshold"]);
+            _fcAimingAlignment     = Convert.ToString(Dictionary.dropdownState["Aiming Boundaries Alignment"]) ?? "Center";
+            _fcPredictionMethod    = Convert.ToString(Dictionary.dropdownState["Prediction Method"]) ?? "Kalman Filter";
+            _fcClosestToMouse      = Convert.ToString(Dictionary.dropdownState["Detection Area Type"]) == "Closest to Mouse";
 
             // Single P/Invoke for the frame — replaces repeated GetCursorPosition calls.
             _fcMousePos = WinAPICaller.GetCursorPosition();
 
             // Target-class ID — linear search only on dropdown change.
-            string tc = Dictionary.dropdownState["Target Class"];
+            string tc = Convert.ToString(Dictionary.dropdownState["Target Class"]) ?? "Best Confidence";
             if (tc != _cachedTargetClassStr)
             {
                 _cachedTargetClassStr = tc;
@@ -502,7 +502,6 @@ namespace Venkatesh2.AILogic
 
         private async void AiLoop()
         {
-            DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
             Stopwatch frameTimer = new();
 
             while (_isAiLoopRunning)
@@ -535,15 +534,16 @@ namespace Venkatesh2.AILogic
                 }
 
                 Prediction? closestPrediction = GetClosestPrediction();
+                DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
 
                 if (closestPrediction == null)
                 {
-                    DisableOverlay(DetectedPlayerOverlay!);
+                    DisableOverlay(DetectedPlayerOverlay);
                 }
                 else
                 {
                     await AutoTrigger();
-                    CalculateCoordinates(DetectedPlayerOverlay!, closestPrediction, _scaleX, _scaleY);
+                    CalculateCoordinates(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
                     HandleAim(closestPrediction);
                 }
 
@@ -624,28 +624,24 @@ namespace Venkatesh2.AILogic
             }
         }
 
-        private static void DisableOverlay(DetectedPlayerWindow DetectedPlayerOverlay)
+        private static void DisableOverlay(DetectedPlayerWindow? DetectedPlayerOverlay)
         {
-            if (Dictionary.toggleState["Show Detected Player"] && Dictionary.DetectedPlayerOverlay != null)
+            if (DetectedPlayerOverlay == null) return;
+            if (!Convert.ToBoolean(Dictionary.toggleState["Show Detected Player"])) return;
+
+            Application.Current.Dispatcher.BeginInvoke(() =>
             {
-                Application.Current.Dispatcher.BeginInvoke(() =>
-                {
-                    if (Dictionary.toggleState["Show AI Confidence"])
-                    {
-                        DetectedPlayerOverlay!.DetectedPlayerConfidence.Opacity = 0;
-                    }
+                if (Convert.ToBoolean(Dictionary.toggleState["Show AI Confidence"]))
+                    DetectedPlayerOverlay.DetectedPlayerConfidence.Opacity = 0;
 
-                    if (Dictionary.toggleState["Show Tracers"])
-                    {
-                        DetectedPlayerOverlay!.DetectedTracers.Opacity = 0;
-                    }
+                if (Convert.ToBoolean(Dictionary.toggleState["Show Tracers"]))
+                    DetectedPlayerOverlay.DetectedTracers.Opacity = 0;
 
-                    DetectedPlayerOverlay!.DetectedPlayerFocus.Opacity = 0;
-                });
-            }
+                DetectedPlayerOverlay.DetectedPlayerFocus.Opacity = 0;
+            });
         }
 
-        private void UpdateOverlay(DetectedPlayerWindow DetectedPlayerOverlay, Prediction closestPrediction)
+        private void UpdateOverlay(DetectedPlayerWindow? DetectedPlayerOverlay, Prediction closestPrediction)
         {
             var scalingFactorX = WinAPICaller.scalingFactorX;
             var scalingFactorY = WinAPICaller.scalingFactorY;
@@ -660,7 +656,8 @@ namespace Venkatesh2.AILogic
 
             Application.Current.Dispatcher.BeginInvoke(() =>
             {
-                if (Dictionary.toggleState["Show AI Confidence"])
+                if (DetectedPlayerOverlay == null) return;
+                if (Convert.ToBoolean(Dictionary.toggleState["Show AI Confidence"]))
                 {
                     DetectedPlayerOverlay.DetectedPlayerConfidence.Opacity = 1;
                     DetectedPlayerOverlay.DetectedPlayerConfidence.Content = $"{closestPrediction.ClassName}: {Math.Round((AIConf * 100), 2)}%";
@@ -670,11 +667,11 @@ namespace Venkatesh2.AILogic
                         centerX - labelEstimatedHalfWidth,
                         centerY - DetectedPlayerOverlay.DetectedPlayerConfidence.ActualHeight - 2, 0, 0);
                 }
-                var showTracers = Dictionary.toggleState["Show Tracers"];
+                bool showTracers = Convert.ToBoolean(Dictionary.toggleState["Show Tracers"]);
                 DetectedPlayerOverlay.DetectedTracers.Opacity = showTracers ? 1 : 0;
                 if (showTracers)
                 {
-                    var tracerPosition = Dictionary.dropdownState["Tracer Position"];
+                    string tracerPosition = Convert.ToString(Dictionary.dropdownState["Tracer Position"]) ?? "Bottom";
 
                     var boxTop = centerY;
                     var boxBottom = centerY + LastDetectionBox.Height;
@@ -719,7 +716,7 @@ namespace Venkatesh2.AILogic
                     }
                 }
 
-                DetectedPlayerOverlay.Opacity = Dictionary.sliderSettings["Opacity"];
+                DetectedPlayerOverlay.Opacity = Convert.ToDouble(Dictionary.sliderSettings["Opacity"]);
 
                 DetectedPlayerOverlay.DetectedPlayerFocus.Opacity = 1;
                 DetectedPlayerOverlay.DetectedPlayerFocus.Margin = new Thickness(
@@ -729,13 +726,13 @@ namespace Venkatesh2.AILogic
             });
         }
 
-        private void CalculateCoordinates(DetectedPlayerWindow DetectedPlayerOverlay, Prediction closestPrediction, float scaleX, float scaleY)
+        private void CalculateCoordinates(DetectedPlayerWindow? DetectedPlayerOverlay, Prediction closestPrediction, float scaleX, float scaleY)
         {
             AIConf = closestPrediction.Confidence;
 
-            if (_fcShowDetectedPlayer && Dictionary.DetectedPlayerOverlay != null)
+            if (_fcShowDetectedPlayer && DetectedPlayerOverlay != null)
             {
-                UpdateOverlay(DetectedPlayerOverlay!, closestPrediction);
+                UpdateOverlay(DetectedPlayerOverlay, closestPrediction);
                 if (!_fcAimAssist) return;
             }
 
@@ -1260,14 +1257,9 @@ namespace Venkatesh2.AILogic
 
         private void SaveFrame(Bitmap? frame, Prediction? DoLabel = null)
         {
-            // Only save frames if "Collect Data While Playing" is enabled
-            if (!Dictionary.toggleState["Collect Data While Playing"]) return;
-
-            // The capture path skips allocating a Bitmap when this toggle is off; if it's null we can't save.
+            if (!_fcCollectData) return;
             if (frame == null) return;
-
-            // Skip if we're in constant tracking mode (unless auto-labeling is enabled)
-            if (Dictionary.toggleState["Constant AI Tracking"] && !Dictionary.toggleState["Auto Label Data"]) return;
+            if (_fcConstantAiTracking && !Convert.ToBoolean(Dictionary.toggleState["Auto Label Data"])) return;
 
             // Cooldown check
             long now = Environment.TickCount64;
@@ -1288,7 +1280,7 @@ namespace Venkatesh2.AILogic
                 // Save synchronously to avoid "Object is currently in use elsewhere" error
                 frame.Save(imagePath, ImageFormat.Jpeg);
 
-                if (Dictionary.toggleState["Auto Label Data"] && DoLabel != null)
+                if (Convert.ToBoolean(Dictionary.toggleState["Auto Label Data"]) && DoLabel != null)
                 {
                     var labelPath = Path.Combine("bin", "labels", $"{uuid}.txt");
 
