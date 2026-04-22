@@ -31,6 +31,10 @@ namespace AILogic
         // Performance tracking
         private int _consecutiveFailures = 0;
         private const int MAX_CONSECUTIVE_FAILURES = 5;
+
+        // Capture-state tracking — when false the input float tensor is still zero-initialised,
+        // so we must block until AcquireNextFrame succeeds at least once.
+        private bool _hasProducedFrame = false;
         #endregion
         #region Handlers
         public CaptureManager()
@@ -45,6 +49,7 @@ namespace AILogic
             {
                 _displayChangesPending = true;
                 _consecutiveFailures = 0;
+                _hasProducedFrame = false; // DXGI is about to be rebuilt — force a blocking wait again.
                 DisposeDxgiResources();
             }
             LogManager.Log(LogLevel.Info, "Display change detected. DirectX resources will be reinitialized.");
@@ -72,6 +77,9 @@ namespace AILogic
         public void InitializeDxgiDuplication()
         {
             DisposeDxgiResources();
+            // Fresh duplication — first AcquireNextFrame must block until a frame lands so the
+            // input tensor is populated before the AI loop reads it.
+            _hasProducedFrame = false;
             try
             {
                 var currentDisplay = DisplayManager.CurrentDisplay;
@@ -285,7 +293,17 @@ namespace AILogic
                     });
                 }
 
-                int timeout = _consecutiveFailures > 0 ? 5 : 1;
+                // At 144 FPS we poll faster than the monitor refreshes (~6.9 ms vs 16.7 ms at 60 Hz),
+                // so most AcquireNextFrame calls will WaitTimeout and reuse the previous capture —
+                // that's fine once we HAVE a previous capture. Before the first successful capture
+                // the float tensor is still zeros, and running inference on zeros produces a
+                // deterministic bogus output with no relation to the screen. Block on the first
+                // call until a real frame lands.
+                int timeout;
+                if (!_hasProducedFrame)       timeout = 500; // first frame after (re)init — wait
+                else if (_consecutiveFailures > 0) timeout = 5;
+                else                          timeout = 1;
+
                 var result = _deskDuplication!.AcquireNextFrame((uint)timeout, out var frameInfo, out desktopResource);
 
                 if (result == Vortice.DXGI.ResultCode.WaitTimeout)
@@ -309,6 +327,7 @@ namespace AILogic
 
                 frameAcquired = true;
                 _consecutiveFailures = 0;
+                _hasProducedFrame = true;
 
                 using (var screenTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                 {

@@ -1360,6 +1360,20 @@ namespace Venkatesh2.AILogic
             _hbLastTick = now;
 
             if (_reusableOutputArray == null) { Log(LogLevel.Info, "[hb] output array is null"); return; }
+            if (_reusableInputArray == null)  { Log(LogLevel.Info, "[hb] input array is null"); return; }
+
+            // Input-buffer scan — if this stays at 0/0, CaptureForInference never wrote to it
+            // and inference is running on an all-zero tensor (producing the same deterministic
+            // YOLO output every frame regardless of what's on screen).
+            int inNonZero = 0;
+            float inMax = 0f;
+            for (int i = 0; i < _reusableInputArray.Length; i++)
+            {
+                float v = _reusableInputArray[i];
+                if (v != 0f) inNonZero++;
+                float a = Math.Abs(v);
+                if (a > inMax) inMax = a;
+            }
 
             int stride = 4 + NUM_CLASSES;
 
@@ -1411,9 +1425,10 @@ namespace Venkatesh2.AILogic
             string sample = $"[{_reusableOutputArray[0]:F3}, {_reusableOutputArray[1]:F3}, {_reusableOutputArray[2]:F3}, {_reusableOutputArray[3]:F3}, {_reusableOutputArray[4]:F3}]";
 
             Log(LogLevel.Info,
-                $"[hb] frames={_hbFrameCounter} nonZero={nonZero}/{_reusableOutputArray.Length} " +
-                $"A(bboxMax={bboxMaxA:F2} classMax={classMaxA:F3} above0.5={aboveHalfA}) " +
-                $"B(classMax={classMaxB:F3} above0.5={aboveHalfB}) " +
+                $"[hb] frames={_hbFrameCounter} " +
+                $"INPUT(nonZero={inNonZero}/{_reusableInputArray.Length} max={inMax:F3}) " +
+                $"OUT(nonZero={nonZero}/{_reusableOutputArray.Length} " +
+                $"bboxMax={bboxMaxA:F2} classMax={classMaxA:F3} above0.5={aboveHalfA}) " +
                 $"first5={sample} threshold={conf:F2} aimHeld={aimHeld} " +
                 $"aimAssist={_fcAimAssist} showPlayer={_fcShowDetectedPlayer} autoTrig={_fcAutoTrigger}");
         }
