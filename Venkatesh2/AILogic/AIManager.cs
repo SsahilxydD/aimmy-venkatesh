@@ -113,6 +113,12 @@ namespace Venkatesh2.AILogic
         private float[]? _reusableOutputArray;
         private List<NamedOnnxValue>? _reusableOutputs;
 
+        // Diagnostic heartbeat — verifies inference is producing output and tells us the
+        // confidence distribution so we can tell "inference is silently broken" from
+        // "inference works but no enemies on screen / threshold too high".
+        private long _hbLastTick = 0;
+        private long _hbFrameCounter = 0;
+
         // Reused per-frame detection list — avoids a new List<Prediction> allocation every inference call.
         private readonly List<Prediction> _kdPredictions = new(32);
 
@@ -919,6 +925,10 @@ namespace Venkatesh2.AILogic
                 _onnxModel.Run(_reusableInputs, _reusableOutputs, _modeloptions);
                 outputTensor = _reusableOutputTensor;
 
+                // Diagnostic heartbeat — proves inference ran AND the pre-allocated output
+                // was actually populated by ORT (vs. silently returned as zeros).
+                LogInferenceHeartbeat();
+
                 if (outputTensor == null)
                 {
                     Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
@@ -1307,6 +1317,46 @@ namespace Venkatesh2.AILogic
         }
 
         #endregion AI Loop Functions
+
+        // Logs one line every ~3 seconds with inference stats. Cheap enough to leave on;
+        // doubles as proof the hot path is actually running.
+        private void LogInferenceHeartbeat()
+        {
+            _hbFrameCounter++;
+            long now = Environment.TickCount64;
+            if (now - _hbLastTick < 3000) return;
+            _hbLastTick = now;
+
+            if (_reusableOutputArray == null) { Log(LogLevel.Info, "[hb] output array is null"); return; }
+
+            // Scan the whole output buffer — in YOLOv8 layout [1, 4+C, A], the class scores
+            // live in the last C * A floats. maxAbs==0 means ORT never wrote to our buffer.
+            float maxAbs = 0f;
+            int classStart = 4 * NUM_DETECTIONS;
+            int classEnd   = (4 + NUM_CLASSES) * NUM_DETECTIONS;
+            float maxConf = 0f;
+            int aboveHalf = 0;
+            for (int i = 0; i < _reusableOutputArray.Length; i++)
+            {
+                float a = Math.Abs(_reusableOutputArray[i]);
+                if (a > maxAbs) maxAbs = a;
+            }
+            for (int i = classStart; i < classEnd && i < _reusableOutputArray.Length; i++)
+            {
+                float c = _reusableOutputArray[i];
+                if (c > maxConf) maxConf = c;
+                if (c > 0.5f) aboveHalf++;
+            }
+
+            double conf = Convert.ToDouble(Dictionary.sliderSettings["AI Minimum Confidence"]) / 100.0;
+            bool aimHeld = InputLogic.InputBindingManager.IsHoldingBinding("Aim Keybind")
+                        || InputLogic.InputBindingManager.IsHoldingBinding("Second Aim Keybind");
+
+            Log(LogLevel.Info,
+                $"[hb] frames={_hbFrameCounter} outMax={maxAbs:F3} bestConf={maxConf:F3} " +
+                $"above0.5={aboveHalf} threshold={conf:F2} aimHeld={aimHeld} " +
+                $"aimAssist={_fcAimAssist} showPlayer={_fcShowDetectedPlayer} autoTrig={_fcAutoTrigger}");
+        }
 
         #endregion AI
 
