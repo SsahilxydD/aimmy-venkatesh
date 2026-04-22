@@ -587,7 +587,7 @@ namespace Venkatesh2.AILogic
                     // Log but never let a frame exception escape and kill the loop.
                     // ObjectDisposedException here means the model was swapped mid-frame;
                     // just skip the frame and the next iteration will see ct cancelled.
-                    Log(LogLevel.Error, $"AiLoop frame error: {ex.GetType().Name}: {ex.Message}");
+                    LogException("AiLoop", ex);
                     try { await Task.Delay(IDLE_DELAY_MS, ct); } catch { break; }
                 }
             }

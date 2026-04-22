@@ -1,5 +1,6 @@
 ﻿using Venkatesh2.Theme;
 using Class;
+using Other;
 using System.Runtime.InteropServices;
 using System.Windows;
 
@@ -21,6 +22,34 @@ namespace Venkatesh2
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // Initialize the runtime log before anything else so every subsequent event is captured.
+            LogManager.Initialize();
+
+            // ── Global exception hooks ────────────────────────────────────────────────────
+            // WPF UI-thread exceptions (data-binding failures, event handlers, etc.)
+            DispatcherUnhandledException += (_, ev) =>
+            {
+                LogManager.LogFatal("DispatcherUnhandledException", ev.Exception);
+                // Do NOT set e.Handled — let WPF terminate so the user sees a crash.
+                // The log is already written to disk at LogManager.LogPath.
+            };
+
+            // CLR exceptions that escape every catch on background threads.
+            AppDomain.CurrentDomain.UnhandledException += (_, ev) =>
+            {
+                if (ev.ExceptionObject is Exception ex)
+                    LogManager.LogFatal("AppDomain.UnhandledException", ex);
+                else
+                    LogManager.Log(LogManager.LogLevel.Fatal, $"AppDomain.UnhandledException (non-Exception): {ev.ExceptionObject}");
+            };
+
+            // Async tasks whose exceptions are never observed — keep the process alive but log them.
+            TaskScheduler.UnobservedTaskException += (_, ev) =>
+            {
+                LogManager.LogException("UnobservedTask", ev.Exception);
+                ev.SetObserved();
+            };
+
             try
             {
                 if (TimeBeginPeriod(HighResTimerMs) == 0) _highResTimerActive = true;
@@ -65,6 +94,7 @@ namespace Venkatesh2
 
         protected override void OnExit(ExitEventArgs e)
         {
+            LogManager.WriteFooter();
             if (_highResTimerActive)
             {
                 try { TimeEndPeriod(HighResTimerMs); } catch { }
