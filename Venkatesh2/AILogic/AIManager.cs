@@ -1164,7 +1164,9 @@ namespace Venkatesh2.AILogic
                     float x_max = x_center + halfW;
                     float y_max = y_center + halfH;
 
-                    if (x_min < fovMinX || x_max > fovMaxX || y_min < fovMinY || y_max > fovMaxY) continue;
+                    // Check center point only — a close/large enemy whose box overflows the FOV
+                    // boundary is still a valid target; filtering by corners drops them mid-track.
+                    if (x_center < fovMinX || x_center > fovMaxX || y_center < fovMinY || y_center > fovMaxY) continue;
 
                     KDpredictions.Add(new Prediction
                     {
@@ -1222,7 +1224,7 @@ namespace Venkatesh2.AILogic
                 float x_max = x_center + width / 2;
                 float y_max = y_center + height / 2;
 
-                if (x_min < fovMinX || x_max > fovMaxX || y_min < fovMinY || y_max > fovMaxY) continue;
+                if (x_center < fovMinX || x_center > fovMaxX || y_center < fovMinY || y_center > fovMaxY) continue;
 
                 KDpredictions.Add(new Prediction
                 {
