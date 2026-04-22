@@ -371,7 +371,7 @@ namespace Venkatesh2.AILogic
                 foreach (var kvp in inputMetadata)
                 {
                     string dimensionsStr = string.Join("x", kvp.Value.Dimensions);
-                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
+                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}, ElementType: {kvp.Value.ElementType?.Name ?? "unknown"}");
 
                     // Check if model is dynamic (dimensions are -1)
                     if (kvp.Value.Dimensions.Any(d => d == -1))
@@ -389,7 +389,7 @@ namespace Venkatesh2.AILogic
                 foreach (var kvp in outputMetadata)
                 {
                     string dimensionsStr = string.Join("x", kvp.Value.Dimensions);
-                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
+                    Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}, ElementType: {kvp.Value.ElementType?.Name ?? "unknown"}");
                 }
 
                 IsDynamicModel = isDynamic;
@@ -936,6 +936,10 @@ namespace Venkatesh2.AILogic
 
                 if (_onnxModel == null || _ioBinding == null) return null;
 
+                // Zero the output buffer each frame so the heartbeat can tell "ORT touched this
+                // region" from "leftover data from a previous frame". Cheap on 42k floats.
+                Array.Clear(_reusableOutputArray!, 0, _reusableOutputArray!.Length);
+
                 // RunWithBinding — the canonical path for pre-allocated outputs on DirectML EP.
                 // ORT writes straight into _reusableOutputArray (pinned by _outputOrtValue).
                 _onnxModel.RunWithBinding(_modeloptions, _ioBinding);
@@ -1345,36 +1349,60 @@ namespace Venkatesh2.AILogic
 
             if (_reusableOutputArray == null) { Log(LogLevel.Info, "[hb] output array is null"); return; }
 
-            // Split the scan into bbox region (channels 0..3) and class region (channels 4+).
-            // This lets us tell "ORT partially populated the output" from "model just saw nothing".
-            int classStart = 4 * NUM_DETECTIONS;
-            int classEnd   = (4 + NUM_CLASSES) * NUM_DETECTIONS;
+            int stride = 4 + NUM_CLASSES;
 
-            float bboxMax = 0f;
-            for (int i = 0; i < classStart && i < _reusableOutputArray.Length; i++)
+            // Layout A: [1, C, A] — channel-major (what the metadata claims)
+            //   bbox: indices 0 .. 4*A-1
+            //   conf: indices 4*A .. (4+K)*A-1
+            int classStartA = 4 * NUM_DETECTIONS;
+            int classEndA   = (4 + NUM_CLASSES) * NUM_DETECTIONS;
+
+            float bboxMaxA = 0f;
+            for (int i = 0; i < classStartA && i < _reusableOutputArray.Length; i++)
             {
                 float a = Math.Abs(_reusableOutputArray[i]);
-                if (a > bboxMax) bboxMax = a;
+                if (a > bboxMaxA) bboxMaxA = a;
             }
 
-            float classMin = float.MaxValue, classMax = float.MinValue;
-            int aboveHalf = 0;
-            for (int i = classStart; i < classEnd && i < _reusableOutputArray.Length; i++)
+            float classMaxA = 0f;
+            int aboveHalfA = 0;
+            for (int i = classStartA; i < classEndA && i < _reusableOutputArray.Length; i++)
             {
                 float c = _reusableOutputArray[i];
-                if (c < classMin) classMin = c;
-                if (c > classMax) classMax = c;
-                if (c > 0.5f) aboveHalf++;
+                if (c > classMaxA) classMaxA = c;
+                if (c > 0.5f) aboveHalfA++;
             }
-            if (classMin == float.MaxValue) { classMin = 0; classMax = 0; }
+
+            // Layout B: [1, A, C] — anchor-major (each anchor is 5 consecutive floats)
+            //   conf for anchor a is at index a*stride + 4 (for 4 bbox + 1 class)
+            float classMaxB = 0f;
+            int aboveHalfB = 0;
+            for (int a = 0; a < NUM_DETECTIONS && (a * stride + stride - 1) < _reusableOutputArray.Length; a++)
+            {
+                for (int c = 0; c < NUM_CLASSES; c++)
+                {
+                    float v = _reusableOutputArray[a * stride + 4 + c];
+                    if (v > classMaxB) classMaxB = v;
+                    if (v > 0.5f) aboveHalfB++;
+                }
+            }
+
+            // Non-zero count across the whole buffer — 0 means ORT literally wrote nothing this frame.
+            int nonZero = 0;
+            for (int i = 0; i < _reusableOutputArray.Length; i++)
+                if (_reusableOutputArray[i] != 0f) nonZero++;
 
             double conf = Convert.ToDouble(Dictionary.sliderSettings["AI Minimum Confidence"]) / 100.0;
             bool aimHeld = InputLogic.InputBindingManager.IsHoldingBinding("Aim Keybind")
                         || InputLogic.InputBindingManager.IsHoldingBinding("Second Aim Keybind");
 
+            string sample = $"[{_reusableOutputArray[0]:F3}, {_reusableOutputArray[1]:F3}, {_reusableOutputArray[2]:F3}, {_reusableOutputArray[3]:F3}, {_reusableOutputArray[4]:F3}]";
+
             Log(LogLevel.Info,
-                $"[hb] frames={_hbFrameCounter} bboxMax={bboxMax:F2} classMin={classMin:F3} classMax={classMax:F3} " +
-                $"above0.5={aboveHalf} threshold={conf:F2} aimHeld={aimHeld} " +
+                $"[hb] frames={_hbFrameCounter} nonZero={nonZero}/{_reusableOutputArray.Length} " +
+                $"A(bboxMax={bboxMaxA:F2} classMax={classMaxA:F3} above0.5={aboveHalfA}) " +
+                $"B(classMax={classMaxB:F3} above0.5={aboveHalfB}) " +
+                $"first5={sample} threshold={conf:F2} aimHeld={aimHeld} " +
                 $"aimAssist={_fcAimAssist} showPlayer={_fcShowDetectedPlayer} autoTrig={_fcAutoTrigger}");
         }
 
