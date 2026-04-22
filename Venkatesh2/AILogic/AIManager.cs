@@ -99,19 +99,20 @@ namespace Venkatesh2.AILogic
         private float _scaleX => ScreenWidth / (float)IMAGE_SIZE;
         private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
 
-        // Tensor reuse (model inference)
-        private DenseTensor<float>? _reusableTensor;
+        // Tensor reuse (model inference). Backing buffers stay pinned via OrtValues below.
         private float[]? _reusableInputArray;
-        private List<NamedOnnxValue>? _reusableInputs;
-
-        // Pre-allocated output tensor. Used with the Run(inputs, outputs, options) overload —
-        // the void-return overload avoids DisposableNamedOnnxValue.CreateFromOrtValue, which
-        // throws "OnnxValueType : ONNX_TYPE_UNKNOWN is not supported" on the DirectML EP when
-        // ORT can't resolve the output OrtValue's type metadata. Pre-binding a typed buffer
-        // side-steps the type lookup entirely — ORT writes straight into _reusableOutputArray.
-        private DenseTensor<float>? _reusableOutputTensor;
         private float[]? _reusableOutputArray;
-        private List<NamedOnnxValue>? _reusableOutputs;
+        private DenseTensor<float>? _reusableOutputTensor; // managed view for PrepareKDTreeData
+
+        // IoBinding path — the only reliable way to get DirectML EP to fully populate the
+        // output buffer. The previous Run(inputs, outputs, options) overload with
+        // NamedOnnxValue wrappers was producing *partial* writes (bbox channels populated,
+        // class-score channel all zeros), even though the Run call itself succeeded.
+        // OrtValue.CreateTensorValueFromMemory pins the managed array for the OrtValue's
+        // lifetime, so ORT writes straight into _reusableOutputArray.
+        private OrtIoBinding? _ioBinding;
+        private OrtValue? _inputOrtValue;
+        private OrtValue? _outputOrtValue;
 
         // Diagnostic heartbeat — verifies inference is producing output and tells us the
         // confidence distribution so we can tell "inference is silently broken" from
@@ -896,33 +897,48 @@ namespace Venkatesh2.AILogic
 
             try
             {
-                // Allocate the input array + DenseTensor once per IMAGE_SIZE. The tensor wraps the
-                // array by reference, so writes to _reusableInputArray update the tensor buffer
-                // directly — no per-frame CopyTo needed.
+                // (Re)allocate when IMAGE_SIZE, NUM_CLASSES, or NUM_DETECTIONS changes. Each
+                // change recreates the managed arrays AND the OrtValues that pin them,
+                // AND the IoBinding that ties them to the session.
                 int expectedOutputLen = 1 * (4 + NUM_CLASSES) * NUM_DETECTIONS;
                 if (_reusableInputArray == null
                     || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE
-                    || _reusableTensor == null
-                    || _reusableTensor.Dimensions[2] != IMAGE_SIZE
                     || _reusableOutputArray == null
-                    || _reusableOutputArray.Length != expectedOutputLen)
+                    || _reusableOutputArray.Length != expectedOutputLen
+                    || _ioBinding == null)
                 {
-                    _reusableInputArray = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
-                    _reusableTensor = new DenseTensor<float>(_reusableInputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
-                    _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
+                    // Dispose old OrtValues/binding before swapping the underlying buffers.
+                    _ioBinding?.Dispose();
+                    _inputOrtValue?.Dispose();
+                    _outputOrtValue?.Dispose();
 
+                    _reusableInputArray  = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
                     _reusableOutputArray = new float[expectedOutputLen];
                     _reusableOutputTensor = new DenseTensor<float>(_reusableOutputArray, new int[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS });
+
+                    _inputOrtValue = OrtValue.CreateTensorValueFromMemory(
+                        OrtMemoryInfo.DefaultInstance,
+                        _reusableInputArray.AsMemory(),
+                        new long[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+
+                    _outputOrtValue = OrtValue.CreateTensorValueFromMemory(
+                        OrtMemoryInfo.DefaultInstance,
+                        _reusableOutputArray.AsMemory(),
+                        new long[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS });
+
                     string outName = (_outputNames != null && _outputNames.Count > 0) ? _outputNames[0] : "output0";
-                    _reusableOutputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(outName, _reusableOutputTensor) };
+                    _ioBinding = _onnxModel!.CreateIoBinding();
+                    _ioBinding.BindInput("images", _inputOrtValue);
+                    _ioBinding.BindOutput(outName, _outputOrtValue);
                 }
 
                 Bitmap? frame = _captureManager.CaptureForInference(detectionBox, _reusableInputArray!, IMAGE_SIZE, _fcCollectData);
 
-                if (_onnxModel == null || _reusableInputs == null || _reusableOutputs == null) return null;
+                if (_onnxModel == null || _ioBinding == null) return null;
 
-                // Void-return overload — ORT writes into our pre-allocated _reusableOutputArray.
-                _onnxModel.Run(_reusableInputs, _reusableOutputs, _modeloptions);
+                // RunWithBinding — the canonical path for pre-allocated outputs on DirectML EP.
+                // ORT writes straight into _reusableOutputArray (pinned by _outputOrtValue).
+                _onnxModel.RunWithBinding(_modeloptions, _ioBinding);
                 outputTensor = _reusableOutputTensor;
 
                 // Diagnostic heartbeat — proves inference ran AND the pre-allocated output
@@ -1329,31 +1345,35 @@ namespace Venkatesh2.AILogic
 
             if (_reusableOutputArray == null) { Log(LogLevel.Info, "[hb] output array is null"); return; }
 
-            // Scan the whole output buffer — in YOLOv8 layout [1, 4+C, A], the class scores
-            // live in the last C * A floats. maxAbs==0 means ORT never wrote to our buffer.
-            float maxAbs = 0f;
+            // Split the scan into bbox region (channels 0..3) and class region (channels 4+).
+            // This lets us tell "ORT partially populated the output" from "model just saw nothing".
             int classStart = 4 * NUM_DETECTIONS;
             int classEnd   = (4 + NUM_CLASSES) * NUM_DETECTIONS;
-            float maxConf = 0f;
-            int aboveHalf = 0;
-            for (int i = 0; i < _reusableOutputArray.Length; i++)
+
+            float bboxMax = 0f;
+            for (int i = 0; i < classStart && i < _reusableOutputArray.Length; i++)
             {
                 float a = Math.Abs(_reusableOutputArray[i]);
-                if (a > maxAbs) maxAbs = a;
+                if (a > bboxMax) bboxMax = a;
             }
+
+            float classMin = float.MaxValue, classMax = float.MinValue;
+            int aboveHalf = 0;
             for (int i = classStart; i < classEnd && i < _reusableOutputArray.Length; i++)
             {
                 float c = _reusableOutputArray[i];
-                if (c > maxConf) maxConf = c;
+                if (c < classMin) classMin = c;
+                if (c > classMax) classMax = c;
                 if (c > 0.5f) aboveHalf++;
             }
+            if (classMin == float.MaxValue) { classMin = 0; classMax = 0; }
 
             double conf = Convert.ToDouble(Dictionary.sliderSettings["AI Minimum Confidence"]) / 100.0;
             bool aimHeld = InputLogic.InputBindingManager.IsHoldingBinding("Aim Keybind")
                         || InputLogic.InputBindingManager.IsHoldingBinding("Second Aim Keybind");
 
             Log(LogLevel.Info,
-                $"[hb] frames={_hbFrameCounter} outMax={maxAbs:F3} bestConf={maxConf:F3} " +
+                $"[hb] frames={_hbFrameCounter} bboxMax={bboxMax:F2} classMin={classMin:F3} classMax={classMax:F3} " +
                 $"above0.5={aboveHalf} threshold={conf:F2} aimHeld={aimHeld} " +
                 $"aimAssist={_fcAimAssist} showPlayer={_fcShowDetectedPlayer} autoTrig={_fcAutoTrigger}");
         }
@@ -1431,10 +1451,14 @@ namespace Venkatesh2.AILogic
             _captureManager.Dispose();
 
             // Clean up other resources
+            _ioBinding?.Dispose();
+            _ioBinding = null;
+            _inputOrtValue?.Dispose();
+            _inputOrtValue = null;
+            _outputOrtValue?.Dispose();
+            _outputOrtValue = null;
             _reusableInputArray = null;
-            _reusableInputs = null;
             _reusableOutputArray = null;
-            _reusableOutputs = null;
             _reusableOutputTensor = null;
             _onnxModel?.Dispose();
             _onnxModel = null;
