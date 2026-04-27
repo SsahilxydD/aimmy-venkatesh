@@ -56,8 +56,6 @@ namespace Venkatesh2.AILogic
         private long _lastSavedTick = 0;
         private List<string>? _outputNames;
         private RectangleF LastDetectionBox;
-        private KalmanPrediction kalmanPrediction;
-        private WiseTheFoxPrediction wtfpredictionManager;
 
         // Display-aware properties
         private int ScreenWidth => DisplayManager.ScreenWidth;
@@ -77,17 +75,13 @@ namespace Venkatesh2.AILogic
         // Sticky-Aim
         private Prediction? _currentTarget = null;
         private int _consecutiveFramesWithoutTarget = 0;
-        private const int MAX_FRAMES_WITHOUT_TARGET = 3; // Allow 3 frames of target loss
 
-        // Enhanced Sticky Aim State
         private float _lastTargetVelocityX = 0f;
         private float _lastTargetVelocityY = 0f;
-        private float _targetLockScore = 0f;           // Accumulated "stickiness" score
-        private const float LOCK_SCORE_DECAY = 0.85f;  // Decay per frame when target not matched
-        private const float LOCK_SCORE_GAIN = 15f;     // Gain per frame when target matched
-        private const float MAX_LOCK_SCORE = 100f;     // Maximum accumulated score
-        private const float REFERENCE_TARGET_SIZE = 10000f; // Reference area for "close" targets (approx 100x100)
-        private int _framesWithoutMatch = 0;           // Consecutive frames where current target wasn't found
+        private float _lastTargetAccelX = 0f;
+        private float _lastTargetAccelY = 0f;
+        private const float REFERENCE_TARGET_SIZE = 10000f;
+        private int _framesWithoutMatch = 0;
 
         private int detectedX { get; set; }
         private int detectedY { get; set; }
@@ -116,11 +110,7 @@ namespace Venkatesh2.AILogic
         private bool _fcAimAssist;
         private bool _fcShowDetectedPlayer;
         private bool _fcConstantAiTracking;
-        private bool _fcPredictions;
         private bool _fcStickyAim;
-        private bool _fcAutoTrigger;
-        private bool _fcSprayMode;
-        private bool _fcCursorCheck;
         private bool _fcXAxisPct;
         private bool _fcYAxisPct;
         private bool _fcCollectData;
@@ -134,7 +124,6 @@ namespace Venkatesh2.AILogic
         private double _fcXOffsetPct;
         private double _fcStickyThreshold;
         private string _fcAimingAlignment = "Center";
-        private string _fcPredictionMethod = "Kalman Filter";
         // Single P/Invoke mouse-position read per frame replaces 2-3 GetCursorPosition calls.
         private System.Drawing.Point _fcMousePos;
 
@@ -147,11 +136,7 @@ namespace Venkatesh2.AILogic
             _fcAimAssist           = Convert.ToBoolean(Dictionary.toggleState["Aim Assist"]);
             _fcShowDetectedPlayer  = Convert.ToBoolean(Dictionary.toggleState["Show Detected Player"]);
             _fcConstantAiTracking  = Convert.ToBoolean(Dictionary.toggleState["Constant AI Tracking"]);
-            _fcPredictions         = Convert.ToBoolean(Dictionary.toggleState["Predictions"]);
             _fcStickyAim           = Convert.ToBoolean(Dictionary.toggleState["Sticky Aim"]);
-            _fcAutoTrigger         = Convert.ToBoolean(Dictionary.toggleState["Auto Trigger"]);
-            _fcSprayMode           = Convert.ToBoolean(Dictionary.toggleState["Spray Mode"]);
-            _fcCursorCheck         = Convert.ToBoolean(Dictionary.toggleState["Cursor Check"]);
             _fcXAxisPct            = Convert.ToBoolean(Dictionary.toggleState["X Axis Percentage Adjustment"]);
             _fcYAxisPct            = Convert.ToBoolean(Dictionary.toggleState["Y Axis Percentage Adjustment"]);
             _fcCollectData         = Convert.ToBoolean(Dictionary.toggleState["Collect Data While Playing"]);
@@ -164,7 +149,6 @@ namespace Venkatesh2.AILogic
             _fcXOffsetPct          = Convert.ToDouble(Dictionary.sliderSettings["X Offset (%)"]);
             _fcStickyThreshold     = Convert.ToDouble(Dictionary.sliderSettings["Sticky Aim Threshold"]);
             _fcAimingAlignment     = Convert.ToString(Dictionary.dropdownState["Aiming Boundaries Alignment"]) ?? "Center";
-            _fcPredictionMethod    = Convert.ToString(Dictionary.dropdownState["Prediction Method"]) ?? "Kalman Filter";
             _fcClosestToMouse      = Convert.ToString(Dictionary.dropdownState["Detection Area Type"]) == "Closest to Mouse";
 
             // Single P/Invoke for the frame — replaces repeated GetCursorPosition calls.
@@ -193,9 +177,6 @@ namespace Venkatesh2.AILogic
             {
                 _captureManager.InitializeDxgiDuplication();
             }
-
-            kalmanPrediction = new KalmanPrediction();
-            wtfpredictionManager = new WiseTheFoxPrediction();
 
             _modeloptions = new RunOptions();
 
@@ -506,8 +487,7 @@ namespace Venkatesh2.AILogic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool ShouldProcess() =>
             _fcAimAssist ||
-            _fcShowDetectedPlayer ||
-            _fcAutoTrigger;
+            _fcShowDetectedPlayer;
 
         // Target 144 FPS for the active AI loop; ~6.94ms per frame budget
         private const double TARGET_FRAME_MS = 1000.0 / 144.0;
@@ -560,7 +540,6 @@ namespace Venkatesh2.AILogic
                     }
                     else
                     {
-                        await AutoTrigger();
                         CalculateCoordinates(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
                         HandleAim(closestPrediction);
                     }
@@ -587,52 +566,6 @@ namespace Venkatesh2.AILogic
         }
 
         #region AI Loop Functions
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private async Task AutoTrigger()
-        {
-            if (!_fcAutoTrigger ||
-                !(InputBindingManager.IsHoldingBinding("Aim Keybind") && !InputBindingManager.IsHoldingBinding("Second Aim Keybind")) ||
-                _fcConstantAiTracking)
-            {
-                CheckSprayRelease();
-                return;
-            }
-
-            if (_fcSprayMode)
-            {
-                await MouseManager.DoTriggerClick(LastDetectionBox);
-                return;
-            }
-
-            if (_fcCursorCheck)
-            {
-                var mousePos = _fcMousePos;
-
-                if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
-                    return;
-
-                if (LastDetectionBox.Contains(mousePos.X, mousePos.Y))
-                    await MouseManager.DoTriggerClick(LastDetectionBox);
-            }
-            else
-            {
-                await MouseManager.DoTriggerClick();
-            }
-
-            if (!_fcAimAssist || !_fcShowDetectedPlayer) return;
-        }
-
-        private void CheckSprayRelease()
-        {
-            if (!_fcSprayMode) return;
-
-            bool shouldSpray = _fcAutoTrigger &&
-                (InputBindingManager.IsHoldingBinding("Aim Keybind") && InputBindingManager.IsHoldingBinding("Second Aim Keybind"));
-
-            if (!shouldSpray)
-                MouseManager.ResetSprayState();
-        }
 
         private void UpdateFOV()
         {
@@ -799,50 +732,7 @@ namespace Venkatesh2.AILogic
                  InputBindingManager.IsHoldingBinding("Aim Keybind") ||
                  InputBindingManager.IsHoldingBinding("Second Aim Keybind")))
             {
-                if (_fcPredictions)
-                    HandlePredictions(kalmanPrediction, closestPrediction, detectedX, detectedY);
-                else
-                    MouseManager.MoveCrosshair(detectedX, detectedY);
-            }
-        }
-
-        private void HandlePredictions(KalmanPrediction kalmanPrediction, Prediction closestPrediction, int detectedX, int detectedY)
-        {
-            var predictionMethod = _fcPredictionMethod;
-            switch (predictionMethod)
-            {
-                case "Kalman Filter":
-                    KalmanPrediction.Detection detection = new()
-                    {
-                        X = detectedX,
-                        Y = detectedY
-                    };
-
-                    kalmanPrediction.UpdateKalmanFilter(detection);
-                    var predictedPosition = kalmanPrediction.GetKalmanPosition();
-
-                    MouseManager.MoveCrosshair(predictedPosition.X, predictedPosition.Y);
-                    break;
-
-                case "Shall0e's Prediction":
-                    ShalloePredictionV2.UpdatePosition(detectedX, detectedY);
-                    var shalloePos = ShalloePredictionV2.GetSP();
-                    MouseManager.MoveCrosshair(shalloePos.x, shalloePos.y);
-                    break;
-
-                case "wisethef0x's EMA Prediction":
-                    WiseTheFoxPrediction.WTFDetection wtfdetection = new()
-                    {
-                        X = detectedX,
-                        Y = detectedY
-                    };
-
-                    wtfpredictionManager.UpdateDetection(wtfdetection);
-                    var wtfpredictedPosition = wtfpredictionManager.GetEstimatedPosition();
-
-                    // Use both predicted X and Y
-                    MouseManager.MoveCrosshair(wtfpredictedPosition.X, wtfpredictedPosition.Y);
-                    break;
+                MouseManager.MoveCrosshair(detectedX, detectedY);
             }
         }
 
@@ -953,19 +843,14 @@ namespace Venkatesh2.AILogic
                 return bestCandidate;
             }
 
-            // No detections available
             if (bestCandidate == null || KDPredictions == null || KDPredictions.Count == 0)
-            {
                 return HandleNoDetections();
-            }
 
             _consecutiveFramesWithoutTarget = 0;
 
-            // Screen center (where user is aiming)
             float screenCenterX = IMAGE_SIZE / 2f;
             float screenCenterY = IMAGE_SIZE / 2f;
 
-            // STEP 1: Find what the user is aiming at (closest to crosshair)
             Prediction? aimTarget = null;
             float nearestToCrosshairDistSq = float.MaxValue;
 
@@ -980,64 +865,109 @@ namespace Venkatesh2.AILogic
             }
 
             if (aimTarget == null)
-            {
                 return HandleNoDetections();
-            }
 
-            // No current target - acquire what user is aiming at
             if (_currentTarget == null)
-            {
                 return AcquireNewTarget(aimTarget);
-            }
 
-            // STEP 2: Is the aim target the SAME as our current target?
             float lastX = _currentTarget.ScreenCenterX;
             float lastY = _currentTarget.ScreenCenterY;
             float targetArea = _currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height;
             float targetSize = MathF.Sqrt(targetArea);
             float sizeFactor = GetSizeFactor(targetArea);
 
-            // Distance from aim target to our current target's last position
-            float aimToCurrentDistSq = GetDistanceSq(aimTarget.ScreenCenterX, aimTarget.ScreenCenterY, lastX, lastY);
+            float maxRadius = IMAGE_SIZE * 0.5f;
+            float trackingRadiusX = Math.Min(targetSize * 3f, maxRadius);
+            float trackingRadiusY = Math.Min(targetSize * 4.5f, maxRadius * 1.5f);
 
-            // Tracking radius based on target size - larger targets have larger radius
-            float trackingRadius = targetSize * 3f;
-            float trackingRadiusSq = trackingRadius * trackingRadius;
+            float velMagSq = _lastTargetVelocityX * _lastTargetVelocityX + _lastTargetVelocityY * _lastTargetVelocityY;
+            float expectedX = lastX + _lastTargetVelocityX + 0.5f * _lastTargetAccelX;
+            float expectedY = lastY + _lastTargetVelocityY + 0.5f * _lastTargetAccelY;
 
-            // Check size similarity
-            float aimTargetArea = aimTarget.Rectangle.Width * aimTarget.Rectangle.Height;
-            float sizeRatio = MathF.Min(targetArea, aimTargetArea) / MathF.Max(targetArea, aimTargetArea);
+            var currentRect = _currentTarget.Rectangle;
+            RectangleF extrapolatedBox = new(
+                currentRect.X + _lastTargetVelocityX + 0.5f * _lastTargetAccelX,
+                currentRect.Y + _lastTargetVelocityY + 0.5f * _lastTargetAccelY,
+                currentRect.Width,
+                currentRect.Height);
 
-            // Is the aim target the same as our current target?
-            // Same if: close to last position AND similar size
-            bool isSameTarget = (aimToCurrentDistSq < trackingRadiusSq) && (sizeRatio > 0.5f);
+            Prediction? trackedMatch = null;
+            float bestMatchScore = float.MaxValue;
 
-            if (isSameTarget)
+            foreach (var candidate in KDPredictions)
             {
-                // User is still aiming at current target - update and continue
-                _framesWithoutMatch = 0;
-                UpdateVelocity(aimTarget, sizeFactor);
-                _targetLockScore = Math.Min(MAX_LOCK_SCORE, _targetLockScore + LOCK_SCORE_GAIN);
-                _currentTarget = aimTarget;
-                return aimTarget;
+                float candidateArea = candidate.Rectangle.Width * candidate.Rectangle.Height;
+                float sizeRatio = MathF.Min(targetArea, candidateArea) / MathF.Max(targetArea, candidateArea);
+                float imageArea = IMAGE_SIZE * IMAGE_SIZE;
+                float minSizeRatio = targetArea > imageArea * 0.15f ? 0.2f : 0.4f;
+                if (sizeRatio < minSizeRatio) continue;
+
+                float distToExpectedSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, expectedX, expectedY);
+                float distToLastSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, lastX, lastY);
+                float iou = ComputeIoU(candidate.Rectangle, extrapolatedBox);
+
+                float ndxLast = (candidate.ScreenCenterX - lastX) / trackingRadiusX;
+                float ndyLast = (candidate.ScreenCenterY - lastY) / trackingRadiusY;
+                float ellipseDistLastSq = ndxLast * ndxLast + ndyLast * ndyLast;
+
+                float ndxExp = (candidate.ScreenCenterX - expectedX) / trackingRadiusX;
+                float ndyExp = (candidate.ScreenCenterY - expectedY) / trackingRadiusY;
+                float ellipseDistExpSq = ndxExp * ndxExp + ndyExp * ndyExp;
+
+                float positionScore = velMagSq > 4f ? distToExpectedSq : distToLastSq;
+                float iouBonus = iou > 0.3f ? (1f - iou) * 0.5f : 1f;
+                float score = positionScore * iouBonus / (sizeRatio * sizeRatio);
+
+                if (score < bestMatchScore && (ellipseDistLastSq < 1f || ellipseDistExpSq < 1f || iou > 0.3f))
+                {
+                    bestMatchScore = score;
+                    trackedMatch = candidate;
+                }
             }
 
-            // STEP 3: User is aiming at a DIFFERENT target
-            // But we need hysteresis - don't switch on single-frame jitter
+            if (trackedMatch != null)
+            {
+                if (trackedMatch == aimTarget)
+                {
+                    _framesWithoutMatch = 0;
+                    UpdateMotion(trackedMatch, sizeFactor);
+                    _currentTarget = trackedMatch;
+                    return trackedMatch;
+                }
+
+                _framesWithoutMatch++;
+
+                float confRatio = aimTarget.Confidence / Math.Max(_currentTarget.Confidence, 0.01f);
+
+                float crosshairToOldSq = GetDistanceSq(lastX, lastY, screenCenterX, screenCenterY);
+                float distRatio = crosshairToOldSq / Math.Max(nearestToCrosshairDistSq, 1f);
+
+                int requiredFrames;
+                if (distRatio > 16f && confRatio >= 0.6f)
+                    requiredFrames = 1;
+                else if (distRatio > 4f || confRatio >= 0.9f)
+                    requiredFrames = 2;
+                else if (confRatio < 0.6f)
+                    requiredFrames = 5;
+                else
+                    requiredFrames = 3;
+
+                float stickyThreshold = (float)_fcStickyThreshold;
+                bool aimTargetVeryCentered = nearestToCrosshairDistSq < (stickyThreshold * stickyThreshold * 0.25f);
+
+                if ((aimTargetVeryCentered && confRatio >= 0.6f) || _framesWithoutMatch >= requiredFrames)
+                    return AcquireNewTarget(aimTarget);
+
+                UpdateMotion(trackedMatch, sizeFactor);
+                _currentTarget = trackedMatch;
+                return trackedMatch;
+            }
+
             _framesWithoutMatch++;
-
-            // Quick switch if aim target is very close to crosshair (user clearly aiming at it)
-            float stickyThreshold = (float)_fcStickyThreshold;
-            bool aimTargetVeryCentered = nearestToCrosshairDistSq < (stickyThreshold * stickyThreshold * 0.25f);
-
-            if (aimTargetVeryCentered || _framesWithoutMatch >= 3)
-            {
-                // User has clearly moved to new target - switch
+            float thresh = (float)_fcStickyThreshold;
+            if (nearestToCrosshairDistSq < (thresh * thresh * 0.25f) || _framesWithoutMatch >= 3)
                 return AcquireNewTarget(aimTarget);
-            }
 
-            // Not ready to switch yet - return null to avoid flicking
-            // (Don't return old target position, don't return new target position)
             return null;
         }
 
@@ -1049,36 +979,51 @@ namespace Venkatesh2.AILogic
             return dx * dx + dy * dy;
         }
 
-        /// <summary>
-        /// Returns a scaling factor based on target size. Smaller targets (further away) get higher factors
-        /// to make thresholds more forgiving and filtering more aggressive.
-        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float ComputeIoU(RectangleF a, RectangleF b)
+        {
+            float x1 = MathF.Max(a.X, b.X);
+            float y1 = MathF.Max(a.Y, b.Y);
+            float x2 = MathF.Min(a.X + a.Width, b.X + b.Width);
+            float y2 = MathF.Min(a.Y + a.Height, b.Y + b.Height);
+
+            if (x2 <= x1 || y2 <= y1) return 0f;
+
+            float intersection = (x2 - x1) * (y2 - y1);
+            float union = a.Width * a.Height + b.Width * b.Height - intersection;
+            return union > 0f ? intersection / union : 0f;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float GetSizeFactor(float targetArea)
         {
-            // sizeFactor: 1.0 for large/close targets, up to 3.0 for small/distant targets
-            // This makes distant targets more "sticky" to compensate for detection jitter
             float ratio = REFERENCE_TARGET_SIZE / Math.Max(targetArea, 100f);
             return Math.Clamp(ratio, 1.0f, 3.0f);
         }
 
         private Prediction? HandleNoDetections()
         {
-            if (_currentTarget != null && ++_consecutiveFramesWithoutTarget <= MAX_FRAMES_WITHOUT_TARGET)
+            if (_currentTarget != null)
             {
-                // Decay lock score during grace period
-                _targetLockScore *= LOCK_SCORE_DECAY;
+                float velMag = MathF.Sqrt(_lastTargetVelocityX * _lastTargetVelocityX + _lastTargetVelocityY * _lastTargetVelocityY);
+                float lastArea = _currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height;
+                bool closeRange = lastArea > IMAGE_SIZE * IMAGE_SIZE * 0.15f;
+                int dynamicGrace = velMag > 5f ? 6 : velMag > 2f ? 4 : closeRange ? 4 : 2;
 
-                // Reuse a single Prediction object during grace period — avoids heap allocation each miss frame.
-                _gracePrediction.ScreenCenterX      = _currentTarget.ScreenCenterX + _lastTargetVelocityX * _consecutiveFramesWithoutTarget;
-                _gracePrediction.ScreenCenterY      = _currentTarget.ScreenCenterY + _lastTargetVelocityY * _consecutiveFramesWithoutTarget;
-                _gracePrediction.Rectangle          = _currentTarget.Rectangle;
-                _gracePrediction.Confidence         = _currentTarget.Confidence * (1f - _consecutiveFramesWithoutTarget * 0.2f);
-                _gracePrediction.ClassId            = _currentTarget.ClassId;
-                _gracePrediction.ClassName          = _currentTarget.ClassName;
-                _gracePrediction.CenterXTranslated  = _currentTarget.CenterXTranslated;
-                _gracePrediction.CenterYTranslated  = _currentTarget.CenterYTranslated;
-                return _gracePrediction;
+                if (++_consecutiveFramesWithoutTarget <= dynamicGrace)
+                {
+                    float t = _consecutiveFramesWithoutTarget;
+                    float decayRate = 1f / (dynamicGrace + 1);
+                    _gracePrediction.ScreenCenterX      = _currentTarget.ScreenCenterX + _lastTargetVelocityX * t + 0.5f * _lastTargetAccelX * t * t;
+                    _gracePrediction.ScreenCenterY      = _currentTarget.ScreenCenterY + _lastTargetVelocityY * t + 0.5f * _lastTargetAccelY * t * t;
+                    _gracePrediction.Rectangle          = _currentTarget.Rectangle;
+                    _gracePrediction.Confidence         = _currentTarget.Confidence * (1f - t * decayRate);
+                    _gracePrediction.ClassId            = _currentTarget.ClassId;
+                    _gracePrediction.ClassName          = _currentTarget.ClassName;
+                    _gracePrediction.CenterXTranslated  = _currentTarget.CenterXTranslated;
+                    _gracePrediction.CenterYTranslated  = _currentTarget.CenterYTranslated;
+                    return _gracePrediction;
+                }
             }
 
             ResetStickyAimState();
@@ -1089,27 +1034,36 @@ namespace Venkatesh2.AILogic
         {
             _lastTargetVelocityX = 0f;
             _lastTargetVelocityY = 0f;
-            _targetLockScore = LOCK_SCORE_GAIN; // Start with some lock score
+            _lastTargetAccelX = 0f;
+            _lastTargetAccelY = 0f;
             _framesWithoutMatch = 0;
             _currentTarget = target;
             return target;
         }
 
-        private void UpdateVelocity(Prediction newTarget, float sizeFactor)
+        private void UpdateMotion(Prediction newTarget, float sizeFactor)
         {
-            if (_currentTarget != null)
-            {
-                // EMA smoothing on velocity to reduce noise
-                // Use heavier smoothing for smaller/distant targets (more weight on old velocity)
-                // sizeFactor 1.0 -> 0.7/0.3, sizeFactor 3.0 -> 0.9/0.1
-                float smoothing = Math.Clamp(0.6f + (sizeFactor * 0.1f), 0.7f, 0.9f);
-                float newWeight = 1f - smoothing;
+            if (_currentTarget == null) return;
 
-                float newVelX = newTarget.ScreenCenterX - _currentTarget.ScreenCenterX;
-                float newVelY = newTarget.ScreenCenterY - _currentTarget.ScreenCenterY;
-                _lastTargetVelocityX = _lastTargetVelocityX * smoothing + newVelX * newWeight;
-                _lastTargetVelocityY = _lastTargetVelocityY * smoothing + newVelY * newWeight;
-            }
+            float newVelX = newTarget.ScreenCenterX - _currentTarget.ScreenCenterX;
+            float newVelY = newTarget.ScreenCenterY - _currentTarget.ScreenCenterY;
+
+            float newAccelX = newVelX - _lastTargetVelocityX;
+            float newAccelY = newVelY - _lastTargetVelocityY;
+
+            float predX = _currentTarget.ScreenCenterX + _lastTargetVelocityX + 0.5f * _lastTargetAccelX;
+            float predY = _currentTarget.ScreenCenterY + _lastTargetVelocityY + 0.5f * _lastTargetAccelY;
+            float predErrorSq = GetDistanceSq(newTarget.ScreenCenterX, newTarget.ScreenCenterY, predX, predY);
+            float errorNorm = predErrorSq / Math.Max(MathF.Sqrt(_currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height), 10f);
+
+            float baseSmoothing = Math.Clamp(0.6f + (sizeFactor * 0.1f), 0.7f, 0.9f);
+            float smoothingVel = errorNorm > 16f ? 0.3f : errorNorm > 4f ? 0.5f : baseSmoothing;
+            float smoothingAccel = smoothingVel * 0.8f;
+
+            _lastTargetVelocityX = _lastTargetVelocityX * smoothingVel + newVelX * (1f - smoothingVel);
+            _lastTargetVelocityY = _lastTargetVelocityY * smoothingVel + newVelY * (1f - smoothingVel);
+            _lastTargetAccelX = _lastTargetAccelX * smoothingAccel + newAccelX * (1f - smoothingAccel);
+            _lastTargetAccelY = _lastTargetAccelY * smoothingAccel + newAccelY * (1f - smoothingAccel);
         }
 
         private void ResetStickyAimState()
@@ -1119,8 +1073,8 @@ namespace Venkatesh2.AILogic
             _framesWithoutMatch = 0;
             _lastTargetVelocityX = 0f;
             _lastTargetVelocityY = 0f;
-            _targetLockScore = 0f;
-            ShalloePredictionV2.Reset(); // clear velocity history so stale velocity doesn't bleed into next target
+            _lastTargetAccelX = 0f;
+            _lastTargetAccelY = 0f;
         }
 
         private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)

@@ -614,10 +614,6 @@ namespace Venkatesh2
                 {
                     StreamGuardManager.ApplyStreamGuardToAllWindows(Dictionary.toggleState[title]);
                 },
-                ["EMA Smoothening"] = () =>
-                {
-                    MouseManager.IsEMASmoothingEnabled = Dictionary.toggleState[title];
-                },
                 ["X Axis Percentage Adjustment"] = () => UpdateSliderVisibility(uiManager),
                 ["Y Axis Percentage Adjustment"] = () => UpdateSliderVisibility(uiManager)
             };
@@ -777,8 +773,8 @@ namespace Venkatesh2
 
         private void HandleEmergencyStop()
         {
-            var features = new[] { "Aim Assist", "Constant AI Tracking", "Auto Trigger" };
-            var toggles = new[] { uiManager.T_AimAligner, uiManager.T_ConstantAITracking, uiManager.T_AutoTrigger };
+            var features = new[] { "Aim Assist", "Constant AI Tracking" };
+            var toggles = new[] { uiManager.T_AimAligner, uiManager.T_ConstantAITracking };
 
             for (int i = 0; i < features.Length; i++)
             {
@@ -841,12 +837,6 @@ namespace Venkatesh2
             var dropdownConfigs = new[]
             {
                 // AimMenu dropdowns
-                (uiManager.D_PredictionMethod, "Prediction Method", new Dictionary<string, int>
-                {
-                    ["Kalman Filter"] = 0,
-                    ["Shall0e's Prediction"] = 1,
-                    ["wisethef0x's EMA Prediction"] = 2
-                }),
                 (uiManager.D_DetectionAreaType, "Detection Area Type", new Dictionary<string, int>
                 {
                     ["Closest to Center Screen"] = 0,
@@ -906,7 +896,6 @@ namespace Venkatesh2
             }
 
             // Update slider visibility based on loaded states
-            UpdatePredictionSliderVisibility();
             UpdateAimAssistSliderVisibility();
             UpdateAimConfigSliderVisibility();
         }
@@ -953,16 +942,11 @@ namespace Venkatesh2
                 ("Mouse Sensitivity (+/-)", uiManager.S_MouseSensitivity, 0.8),
                 ("Mouse Jitter", uiManager.S_MouseJitter, 0.0),
                 ("Sticky Aim Threshold", uiManager.S_StickyAimThreshold, 50),
-                ("EMA Smoothening", uiManager.S_EMASmoothing, 0.5),
                 ("Y Offset (Up/Down)", uiManager.S_YOffset, 0.0),
                 ("X Offset (Left/Right)", uiManager.S_XOffset, 0.0),
                 ("Y Offset (%)", uiManager.S_YOffsetPercent, 0.0),
                 ("X Offset (%)", uiManager.S_XOffsetPercent, 0.0),
-                ("Auto Trigger Delay", uiManager.S_AutoTriggerDelay, 0.25),
-                ("AI Minimum Confidence", uiManager.S_AIMinimumConfidence, 50.0),
-                ("Kalman Lead Time", uiManager.S_KalmanLeadTime, 0.10),
-                ("WiseTheFox Lead Time", uiManager.S_WiseTheFoxLeadTime, 0.15),
-                ("Shalloe Lead Multiplier", uiManager.S_ShalloeLeadMultiplier, 3.0)
+                ("AI Minimum Confidence", uiManager.S_AIMinimumConfidence, 50.0)
             };
 
             ApplySliderValues(sliderConfigs, Dictionary.sliderSettings);
@@ -973,14 +957,6 @@ namespace Venkatesh2
         {
             var dropdownConfigs = new[]
             {
-
-                ("Prediction Method", uiManager.D_PredictionMethod, new Dictionary<string, int>
-                {
-                    ["Kalman Filter"] = 0,
-                    ["Shall0e's Prediction"] = 1,
-                    ["wisethef0x's EMA Prediction"] = 2
-                }),
-
                 ("Detection Area Type", uiManager.D_DetectionAreaType, new Dictionary<string, int>
                 {
                     ["Closest to Center Screen"] = 0,
@@ -1026,45 +1002,6 @@ namespace Venkatesh2
             };
 
             ApplyDropdownValues(dropdownConfigs, Dictionary.dropdownState);
-
-            // Update prediction slider visibility based on selected method
-            UpdatePredictionSliderVisibility();
-        }
-
-        public void UpdatePredictionSliderVisibility()
-        {
-            // Hide all prediction sliders first
-            if (uiManager.S_KalmanLeadTime != null)
-                uiManager.S_KalmanLeadTime.Visibility = Visibility.Collapsed;
-            if (uiManager.S_WiseTheFoxLeadTime != null)
-                uiManager.S_WiseTheFoxLeadTime.Visibility = Visibility.Collapsed;
-            if (uiManager.S_ShalloeLeadMultiplier != null)
-                uiManager.S_ShalloeLeadMultiplier.Visibility = Visibility.Collapsed;
-
-            // Don't show sliders if Predictions section is collapsed
-            if (Dictionary.minimizeState.TryGetValue("Predictions", out var collapsed) && collapsed == true)
-                return;
-
-            // Get selected method from actual dropdown selection
-            var selectedItem = uiManager.D_PredictionMethod?.DropdownBox?.SelectedItem as ComboBoxItem;
-            string selectedMethod = selectedItem?.Content?.ToString() ?? "";
-
-            // Show only the relevant slider based on selected method
-            switch (selectedMethod)
-            {
-                case "Kalman Filter":
-                    if (uiManager.S_KalmanLeadTime != null)
-                        uiManager.S_KalmanLeadTime.Visibility = Visibility.Visible;
-                    break;
-                case "Shall0e's Prediction":
-                    if (uiManager.S_ShalloeLeadMultiplier != null)
-                        uiManager.S_ShalloeLeadMultiplier.Visibility = Visibility.Visible;
-                    break;
-                case "wisethef0x's EMA Prediction":
-                    if (uiManager.S_WiseTheFoxLeadTime != null)
-                        uiManager.S_WiseTheFoxLeadTime.Visibility = Visibility.Visible;
-                    break;
-            }
         }
 
         public void UpdateAimAssistSliderVisibility()

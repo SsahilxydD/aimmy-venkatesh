@@ -14,8 +14,6 @@ namespace Class
         public AKeyChanger? C_Keybind { get; set; }
         public AToggle? T_ConstantAITracking { get; set; }
         public AToggle? T_StickyAim { get; set; }
-        public AToggle? T_Predictions { get; set; }
-        public AToggle? T_EMASmoothing { get; set; }
         public AKeyChanger? C_EmergencyKeybind { get; set; }
         public AToggle? T_EnableModelSwitchKeybind { get; set; }
         public AKeyChanger? C_ModelSwitchKeybind { get; set; }
@@ -23,10 +21,6 @@ namespace Class
         //Aim Config
         public ATitle? AT_AimConfig { get; set; }
 
-        // Predictions
-        public ATitle? AT_Predictions { get; set; }
-
-        public ADropdown? D_PredictionMethod { get; set; }
         public ADropdown? D_MovementPath { get; set; }
         public ADropdown? D_DetectionAreaType { get; set; }
         public ComboBoxItem? DDI_ClosestToCenterScreen { get; set; }
@@ -39,21 +33,6 @@ namespace Class
         public ASlider? S_YOffsetPercent { get; set; }
         public ASlider? S_XOffset { get; set; }
         public ASlider? S_XOffsetPercent { get; set; }
-        public ASlider? S_EMASmoothing { get; set; }
-        public ASlider? S_KalmanLeadTime { get; set; }
-        public ASlider? S_WiseTheFoxLeadTime { get; set; }
-        public ASlider? S_ShalloeLeadMultiplier { get; set; }
-
-        // Triggerbot
-        public ATitle? AT_TriggerBot { get; set; }
-
-        public AToggle? T_AutoTrigger { get; set; }
-        public AToggle? T_SprayMode { get; set; }
-        //public AToggle? T_OnlyWhenHeld { get; set; }
-        public AToggle? T_CursorCheck { get; set; }
-
-        public ASlider? S_AutoTriggerDelay { get; set; }
-
         // FOV
         public ATitle? AT_FOV { get; set; }
         public AToggle? T_FOV { get; set; }
