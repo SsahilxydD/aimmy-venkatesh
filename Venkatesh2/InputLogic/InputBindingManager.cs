@@ -1,4 +1,5 @@
-﻿using Gma.System.MouseKeyHook;
+﻿using System.Collections.Concurrent;
+using Gma.System.MouseKeyHook;
 using System.Windows.Forms;
 
 namespace InputLogic
@@ -7,7 +8,7 @@ namespace InputLogic
     {
         private IKeyboardMouseEvents? _mEvents;
         private readonly Dictionary<string, string> bindings = [];
-        private static readonly Dictionary<string, bool> isHolding = [];
+        private static readonly ConcurrentDictionary<string, bool> isHolding = new();
         private string? settingBindingId = null;
 
         public event Action<string, string>? OnBindingSet;

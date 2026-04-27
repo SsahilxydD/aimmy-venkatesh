@@ -42,7 +42,7 @@ namespace Other
             ModelListBox.Drop += ModelListBox_DragDrop;
 
             ConfigListBox.AllowDrop = true;
-            ConfigListBox.DragOver += ConfigListBox_DragDrop;
+            ConfigListBox.DragOver += ConfigListBox_DragOver;
             ConfigListBox.Drop += ConfigListBox_DragDrop;
 
 
@@ -212,7 +212,7 @@ namespace Other
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                string targetFolder = "bin/models";
+                string targetFolder = "bin/configs";
 
                 foreach (var file in files)
                 {
@@ -243,7 +243,7 @@ namespace Other
                     if (ModelListBox.Items.Count > 0)
                     {
                         string? lastLoadedModel = Dictionary.lastLoadedModel;
-                        if (lastLoadedModel != "N/A" && !ModelListBox.Items.Contains(lastLoadedModel)) { ModelListBox.SelectedItem = lastLoadedModel; }
+                        if (lastLoadedModel != "N/A" && ModelListBox.Items.Contains(lastLoadedModel)) { ModelListBox.SelectedItem = lastLoadedModel; }
                         SelectedModelNotifier.Content = $"Loaded Model: {lastLoadedModel}";
                     }
                 });
@@ -267,7 +267,7 @@ namespace Other
                     if (ConfigListBox.Items.Count > 0)
                     {
                         string? lastLoadedConfig = Dictionary.lastLoadedConfig;
-                        if (lastLoadedConfig != "N/A" && !ConfigListBox.Items.Contains(lastLoadedConfig)) { ConfigListBox.SelectedItem = lastLoadedConfig; }
+                        if (lastLoadedConfig != "N/A" && ConfigListBox.Items.Contains(lastLoadedConfig)) { ConfigListBox.SelectedItem = lastLoadedConfig; }
 
                         SelectedConfigNotifier.Content = "Loaded Config: " + lastLoadedConfig;
                     }

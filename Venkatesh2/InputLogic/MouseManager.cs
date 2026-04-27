@@ -11,8 +11,14 @@ namespace InputLogic
 {
     internal class MouseManager
     {
-        private static readonly double _sW = WinAPICaller.ScreenWidth;
-        private static readonly double _sH = WinAPICaller.ScreenHeight;
+        private static double _sW = WinAPICaller.ScreenWidth;
+        private static double _sH = WinAPICaller.ScreenHeight;
+
+        internal static void RefreshScreenDimensions()
+        {
+            _sW = DisplayManager.ScreenWidth;
+            _sH = DisplayManager.ScreenHeight;
+        }
 
         private static readonly uint _eMV = (uint)(0x1);
 
@@ -85,7 +91,7 @@ namespace InputLogic
             uint _jv2 = unchecked((uint)(_dX * 0 ^ _dY * 0)); _ = _jv2;
 
             double _tX = _dX - _sW / 2.0;
-            double _tY = _dY - _sH / 2.0;
+            double _tY = _dY - _sW / 2.0;
 
             double _jS = Convert.ToDouble(Dictionary.sliderSettings["Mouse Jitter"]);
             double _jX = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
@@ -119,8 +125,10 @@ namespace InputLogic
                         break;
 
                     case 1:
-                        Point _c1 = new(_s.X + (_e.X - _s.X) / 3, _s.Y + (_e.Y - _s.Y) / 3);
-                        Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3, _s.Y + 2 * (_e.Y - _s.Y) / 3);
+                        int _pxOff = -(_e.Y - _s.Y) / 4;
+                        int _pyOff =  (_e.X - _s.X) / 4;
+                        Point _c1 = new(_s.X + (_e.X - _s.X) / 3 + _pxOff, _s.Y + (_e.Y - _s.Y) / 3 + _pyOff);
+                        Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3 - _pxOff, _s.Y + 2 * (_e.Y - _s.Y) / 3 - _pyOff);
                         _nP = MovementPaths.CubicBezier(_s, _e, _c1, _c2, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
                         _st = 11; break;
 
@@ -129,7 +137,7 @@ namespace InputLogic
                         _st = 11; break;
 
                     case 3:
-                        _nP = MovementPaths.Exponential(_s, _e, 1.0 - (Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"])) - 0.2, 3.0);
+                        _nP = MovementPaths.Exponential(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]), 3.0);
                         _st = 11; break;
 
                     case 4:
@@ -164,8 +172,8 @@ namespace InputLogic
 
                         if (_sendX == 0 && _sendY == 0) { _st = 99; break; }
 
-                        if (_rng.Next(0, 4) == 0) _sendX += _rng.Next(-1, 2);
-                        if (_rng.Next(0, 4) == 0) _sendY += _rng.Next(-1, 2);
+                        if (_jS > 0 && _rng.Next(0, 4) == 0) _sendX += _rng.Next(-1, 2);
+                        if (_jS > 0 && _rng.Next(0, 4) == 0) _sendY += _rng.Next(-1, 2);
 
                         _dispatchMove(_sendX, _sendY);
                         _st = 99; break;

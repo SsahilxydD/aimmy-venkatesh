@@ -131,6 +131,7 @@ namespace AILogic
                     }
 
                     if (foundTarget) break;
+                    adapter.Dispose();
                 }
 
                 // Fallback to specific display index if not found

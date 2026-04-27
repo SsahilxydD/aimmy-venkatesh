@@ -38,6 +38,8 @@ namespace InputLogic
         private static double _pdErrPrevX = 0;
         private static double _pdErrPrevY = 0;
 
+        private static long _noiseFrame = 0;
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static Point Direct(Point end)
         {
@@ -49,9 +51,6 @@ namespace InputLogic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static Point VelocityDamped(Point end, double sensitivity)
         {
-            // PD controller: faster initial response than pure Lerp + derivative braking near target.
-            //   P * error  → proportional: how far we are
-            //   D * Δerror → derivative: how fast error is changing (brakes overshoot, boosts tracking)
             double gain = 1.0 - sensitivity;
             double P = gain * 1.6;
             double D = gain * 0.5;
@@ -59,8 +58,18 @@ namespace InputLogic
             double errX = end.X;
             double errY = end.Y;
 
-            double outX = P * errX + D * (errX - _pdErrPrevX);
-            double outY = P * errY + D * (errY - _pdErrPrevY);
+            double dErrX = errX - _pdErrPrevX;
+            double dErrY = errY - _pdErrPrevY;
+            double jumpSq = dErrX * dErrX + dErrY * dErrY;
+            double errSq = errX * errX + errY * errY;
+            if (jumpSq > errSq * 4.0)
+            {
+                dErrX = 0;
+                dErrY = 0;
+            }
+
+            double outX = P * errX + D * dErrX;
+            double outY = P * errY + D * dErrY;
 
             _pdErrPrevX = errX;
             _pdErrPrevY = errY;
@@ -108,14 +117,26 @@ namespace InputLogic
         {
             double dx = end.X - start.X;
             double dy = end.Y - start.Y;
-            // Squared distance avoids Math.Sqrt; compare to threshold² instead.
             double distSq = dx * dx + dy * dy;
-            if (distSq < threshold * threshold)
-                return Lerp(start, end, t);
+            double threshSq = threshold * threshold;
 
-            Point c1 = new(start.X + (int)(dx / 3), start.Y + (int)(dy / 3));
-            Point c2 = new(start.X + (int)(dx * 2 / 3), start.Y + (int)(dy * 2 / 3));
-            return CubicBezier(start, end, c1, c2, t);
+            double adaptiveT;
+            if (distSq < threshSq)
+            {
+                double ratio = Math.Sqrt(distSq / threshSq);
+                adaptiveT = t * (2.0 - ratio);
+            }
+            else
+            {
+                double ratio = threshSq / distSq;
+                adaptiveT = t * (0.5 + 0.5 * ratio);
+            }
+
+            adaptiveT = Math.Clamp(adaptiveT, 0.05, 0.95);
+
+            return new Point(
+                (int)(start.X + dx * adaptiveT),
+                (int)(start.Y + dy * adaptiveT));
         }
 
         internal static Point PerlinNoise(Point start, Point end, double t, double amplitude = 10.0, double frequency = 0.1)
@@ -123,8 +144,9 @@ namespace InputLogic
             double baseX = start.X + (end.X - start.X) * t;
             double baseY = start.Y + (end.Y - start.Y) * t;
 
-            double noiseX = Noise(t * frequency, 0)   * amplitude;
-            double noiseY = Noise(t * frequency, 100) * amplitude;
+            double phase = _noiseFrame++ * frequency;
+            double noiseX = Noise(phase, 0)   * amplitude;
+            double noiseY = Noise(phase, 100) * amplitude;
 
             double perpX = -(end.Y - start.Y);
             double perpY =   end.X - start.X;

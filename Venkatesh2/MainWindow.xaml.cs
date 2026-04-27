@@ -155,7 +155,7 @@ namespace Venkatesh2
 
         private void OnDisplayChanged(object? sender, DisplayChangedEventArgs e)
         {
-
+            MouseManager.RefreshScreenDimensions();
             // Force update all windows to new display
             DisplayManager.ForceUpdateWindows();
         }

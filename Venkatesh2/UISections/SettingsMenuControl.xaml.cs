@@ -480,6 +480,7 @@ namespace Venkatesh2.Controls
         {
             DisplayManager.DisplayChanged -= OnDisplayChanged;
             AIManager.ClassesUpdated -= OnClassesChanged;
+            AIManager.DynamicModelStatusChanged -= OnDynamicModelStatusChanged;
             _mainWindow?.uiManager.DisplaySelector?.Dispose();
 
             // Save minimize states before disposing

@@ -72,16 +72,20 @@ namespace Venkatesh2.AILogic
         private CancellationTokenSource? _loopCts;
         private Task? _loopTask;
 
-        // Sticky-Aim
+        // Non-sticky aim: IoU continuity (prevents flicker between equidistant targets)
+        private RectangleF _lastAimRect;
+        private bool _hasLastAimRect;
+
+        // Sticky-Aim (SORT-inspired single-target tracker)
         private Prediction? _currentTarget = null;
         private int _consecutiveFramesWithoutTarget = 0;
+        private int _trackAge = 0;
 
         private float _lastTargetVelocityX = 0f;
         private float _lastTargetVelocityY = 0f;
         private float _lastTargetAccelX = 0f;
         private float _lastTargetAccelY = 0f;
         private const float REFERENCE_TARGET_SIZE = 10000f;
-        private int _framesWithoutMatch = 0;
 
         private int detectedX { get; set; }
         private int detectedY { get; set; }
@@ -89,9 +93,10 @@ namespace Venkatesh2.AILogic
         public double AIConf = 0;
         private static int targetX, targetY;
 
-        // Pre-calculated values - now dynamic
+        // Capture is square (IMAGE_SIZE × IMAGE_SIZE, no resize), so both axes use
+        // the same scale to keep movement speed equal on X and Y.
         private float _scaleX => ScreenWidth / (float)IMAGE_SIZE;
-        private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
+        private float _scaleY => ScreenWidth / (float)IMAGE_SIZE;
 
         // Tensor reuse (model inference)
         private DenseTensor<float>? _reusableTensor;
@@ -791,16 +796,32 @@ namespace Venkatesh2.AILogic
                     return null;
                 }
 
-                float fovMinX = (IMAGE_SIZE - _fcFovSize) / 2.0f;
-                float fovMaxX = (IMAGE_SIZE + _fcFovSize) / 2.0f;
-                float fovMinY = fovMinX;
-                float fovMaxY = fovMaxX;
+                float fovMinX, fovMaxX, fovMinY, fovMaxY;
+                if (_fcFovEnabled)
+                {
+                    fovMinX = (IMAGE_SIZE - _fcFovSize) / 2.0f;
+                    fovMaxX = (IMAGE_SIZE + _fcFovSize) / 2.0f;
+                }
+                else
+                {
+                    fovMinX = -IMAGE_SIZE;
+                    fovMaxX = IMAGE_SIZE * 2f;
+                }
+                fovMinY = fovMinX;
+                fovMaxY = fovMaxX;
 
                 List<Prediction> KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
 
                 if (KDPredictions.Count == 0)
                 {
                     SaveFrame(frame);
+                    if (_fcStickyAim && _currentTarget != null)
+                    {
+                        Prediction? graceTarget = HandleNoDetections();
+                        if (graceTarget != null)
+                            UpdateDetectionBox(graceTarget, detectionBox);
+                        return graceTarget;
+                    }
                     return null;
                 }
 
@@ -812,9 +833,23 @@ namespace Venkatesh2.AILogic
                 {
                     var dx = p.CenterXTranslated * IMAGE_SIZE - center;
                     var dy = p.CenterYTranslated * IMAGE_SIZE - center;
-                    double d2 = dx * dx + dy * dy; // dx^2 + dy^2
+                    double d2 = dx * dx + dy * dy;
 
                     if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
+                }
+
+                if (bestCandidate != null)
+                {
+                    double tieZone = bestCandidate.Rectangle.Width * bestCandidate.Rectangle.Height;
+                    foreach (var p in KDPredictions)
+                    {
+                        if (p == bestCandidate) continue;
+                        var dx = p.CenterXTranslated * IMAGE_SIZE - center;
+                        var dy = p.CenterYTranslated * IMAGE_SIZE - center;
+                        double d2 = dx * dx + dy * dy;
+                        if (d2 - bestDistSq < tieZone && p.Confidence > bestCandidate.Confidence)
+                            bestCandidate = p;
+                    }
                 }
 
                 Prediction? finalTarget = HandleStickyAim(bestCandidate, KDPredictions);
@@ -838,37 +873,70 @@ namespace Venkatesh2.AILogic
         {
             if (!_fcStickyAim)
             {
-                _currentTarget = bestCandidate;
                 ResetStickyAimState();
+
+                if (_hasLastAimRect && bestCandidate != null && KDPredictions != null)
+                {
+                    Prediction? continued = null;
+                    float contIoU = 0f;
+                    foreach (var c in KDPredictions)
+                    {
+                        float iou = ComputeIoU(c.Rectangle, _lastAimRect);
+                        if (iou > contIoU) { contIoU = iou; continued = c; }
+                    }
+
+                    if (continued != null && contIoU >= 0.15f && continued != bestCandidate)
+                    {
+                        float half = IMAGE_SIZE / 2f;
+                        float bx = bestCandidate.CenterXTranslated * IMAGE_SIZE - half;
+                        float by = bestCandidate.CenterYTranslated * IMAGE_SIZE - half;
+                        float bestDSq = bx * bx + by * by;
+
+                        float lx = continued.CenterXTranslated * IMAGE_SIZE - half;
+                        float ly = continued.CenterYTranslated * IMAGE_SIZE - half;
+                        float contDSq = lx * lx + ly * ly;
+
+                        float tieZone = continued.Rectangle.Width * continued.Rectangle.Height;
+                        if (contDSq - bestDSq < tieZone)
+                            bestCandidate = continued;
+                    }
+                }
+
+                _hasLastAimRect = bestCandidate != null;
+                if (bestCandidate != null)
+                    _lastAimRect = bestCandidate.Rectangle;
+
                 return bestCandidate;
             }
 
             if (bestCandidate == null || KDPredictions == null || KDPredictions.Count == 0)
                 return HandleNoDetections();
 
-            _consecutiveFramesWithoutTarget = 0;
-
-            float screenCenterX = IMAGE_SIZE / 2f;
-            float screenCenterY = IMAGE_SIZE / 2f;
-
-            Prediction? aimTarget = null;
-            float nearestToCrosshairDistSq = float.MaxValue;
-
-            foreach (var candidate in KDPredictions)
-            {
-                float distSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, screenCenterX, screenCenterY);
-                if (distSq < nearestToCrosshairDistSq)
-                {
-                    nearestToCrosshairDistSq = distSq;
-                    aimTarget = candidate;
-                }
-            }
-
-            if (aimTarget == null)
-                return HandleNoDetections();
-
             if (_currentTarget == null)
-                return AcquireNewTarget(aimTarget);
+            {
+                float half = IMAGE_SIZE / 2f;
+                Prediction? nearest = null;
+                float nearestDistSq = float.MaxValue;
+                foreach (var candidate in KDPredictions)
+                {
+                    float dx = candidate.CenterXTranslated * IMAGE_SIZE - half;
+                    float dy = candidate.CenterYTranslated * IMAGE_SIZE - half;
+                    float dSq = dx * dx + dy * dy;
+                    if (dSq < nearestDistSq) { nearestDistSq = dSq; nearest = candidate; }
+                }
+                if (nearest == null) return null;
+                float tieZone = nearest.Rectangle.Width * nearest.Rectangle.Height;
+                foreach (var candidate in KDPredictions)
+                {
+                    if (candidate == nearest) continue;
+                    float dx = candidate.CenterXTranslated * IMAGE_SIZE - half;
+                    float dy = candidate.CenterYTranslated * IMAGE_SIZE - half;
+                    float dSq = dx * dx + dy * dy;
+                    if (dSq - nearestDistSq < tieZone && candidate.Confidence > nearest.Confidence)
+                        nearest = candidate;
+                }
+                return AcquireNewTarget(nearest);
+            }
 
             float lastX = _currentTarget.ScreenCenterX;
             float lastY = _currentTarget.ScreenCenterY;
@@ -881,30 +949,59 @@ namespace Venkatesh2.AILogic
             float trackingRadiusY = Math.Min(targetSize * 4.5f, maxRadius * 1.5f);
 
             float velMagSq = _lastTargetVelocityX * _lastTargetVelocityX + _lastTargetVelocityY * _lastTargetVelocityY;
-            float expectedX = lastX + _lastTargetVelocityX + 0.5f * _lastTargetAccelX;
-            float expectedY = lastY + _lastTargetVelocityY + 0.5f * _lastTargetAccelY;
+            float dt = _consecutiveFramesWithoutTarget + 1f;
+            float expectedX = lastX + _lastTargetVelocityX * dt + 0.5f * _lastTargetAccelX * dt * dt;
+            float expectedY = lastY + _lastTargetVelocityY * dt + 0.5f * _lastTargetAccelY * dt * dt;
 
             var currentRect = _currentTarget.Rectangle;
             RectangleF extrapolatedBox = new(
-                currentRect.X + _lastTargetVelocityX + 0.5f * _lastTargetAccelX,
-                currentRect.Y + _lastTargetVelocityY + 0.5f * _lastTargetAccelY,
+                currentRect.X + _lastTargetVelocityX * dt + 0.5f * _lastTargetAccelX * dt * dt,
+                currentRect.Y + _lastTargetVelocityY * dt + 0.5f * _lastTargetAccelY * dt * dt,
                 currentRect.Width,
                 currentRect.Height);
 
+            float imageArea = IMAGE_SIZE * IMAGE_SIZE;
+            float minSizeRatio = targetArea > imageArea * 0.15f ? 0.2f : 0.4f;
+
+            // ── Stage 1: IoU matching (SORT-inspired) ──
+            // Bbox overlap is the strongest identity signal for adjacent/overlapping targets.
+            // Two enemies side by side have zero IoU with each other's predicted box.
             Prediction? trackedMatch = null;
-            float bestMatchScore = float.MaxValue;
+            float bestIoU = 0f;
 
             foreach (var candidate in KDPredictions)
             {
                 float candidateArea = candidate.Rectangle.Width * candidate.Rectangle.Height;
                 float sizeRatio = MathF.Min(targetArea, candidateArea) / MathF.Max(targetArea, candidateArea);
-                float imageArea = IMAGE_SIZE * IMAGE_SIZE;
-                float minSizeRatio = targetArea > imageArea * 0.15f ? 0.2f : 0.4f;
+                if (sizeRatio < minSizeRatio) continue;
+
+                float iou = ComputeIoU(candidate.Rectangle, extrapolatedBox);
+                if (iou > bestIoU) { bestIoU = iou; trackedMatch = candidate; }
+            }
+
+            if (trackedMatch != null && bestIoU >= 0.15f)
+            {
+                _trackAge++;
+                int missed = _consecutiveFramesWithoutTarget;
+                _consecutiveFramesWithoutTarget = 0;
+                UpdateMotion(trackedMatch, sizeFactor, missed);
+                _currentTarget = trackedMatch;
+                return trackedMatch;
+            }
+
+            // ── Stage 2: Distance fallback (ByteTrack-inspired) ──
+            // Catches fast movement where the bbox shifted too far for IoU overlap.
+            trackedMatch = null;
+            float bestProximitySq = float.MaxValue;
+
+            foreach (var candidate in KDPredictions)
+            {
+                float candidateArea = candidate.Rectangle.Width * candidate.Rectangle.Height;
+                float sizeRatio = MathF.Min(targetArea, candidateArea) / MathF.Max(targetArea, candidateArea);
                 if (sizeRatio < minSizeRatio) continue;
 
                 float distToExpectedSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, expectedX, expectedY);
                 float distToLastSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, lastX, lastY);
-                float iou = ComputeIoU(candidate.Rectangle, extrapolatedBox);
 
                 float ndxLast = (candidate.ScreenCenterX - lastX) / trackingRadiusX;
                 float ndyLast = (candidate.ScreenCenterY - lastY) / trackingRadiusY;
@@ -914,61 +1011,28 @@ namespace Venkatesh2.AILogic
                 float ndyExp = (candidate.ScreenCenterY - expectedY) / trackingRadiusY;
                 float ellipseDistExpSq = ndxExp * ndxExp + ndyExp * ndyExp;
 
-                float positionScore = velMagSq > 4f ? distToExpectedSq : distToLastSq;
-                float iouBonus = iou > 0.3f ? (1f - iou) * 0.5f : 1f;
-                float score = positionScore * iouBonus / (sizeRatio * sizeRatio);
+                if (!(ellipseDistLastSq < 1f || ellipseDistExpSq < 1f))
+                    continue;
 
-                if (score < bestMatchScore && (ellipseDistLastSq < 1f || ellipseDistExpSq < 1f || iou > 0.3f))
+                float proximityScore = velMagSq > 4f ? distToExpectedSq : distToLastSq;
+                if (proximityScore < bestProximitySq)
                 {
-                    bestMatchScore = score;
+                    bestProximitySq = proximityScore;
                     trackedMatch = candidate;
                 }
             }
 
             if (trackedMatch != null)
             {
-                if (trackedMatch == aimTarget)
-                {
-                    _framesWithoutMatch = 0;
-                    UpdateMotion(trackedMatch, sizeFactor);
-                    _currentTarget = trackedMatch;
-                    return trackedMatch;
-                }
-
-                _framesWithoutMatch++;
-
-                float confRatio = aimTarget.Confidence / Math.Max(_currentTarget.Confidence, 0.01f);
-
-                float crosshairToOldSq = GetDistanceSq(lastX, lastY, screenCenterX, screenCenterY);
-                float distRatio = crosshairToOldSq / Math.Max(nearestToCrosshairDistSq, 1f);
-
-                int requiredFrames;
-                if (distRatio > 16f && confRatio >= 0.6f)
-                    requiredFrames = 1;
-                else if (distRatio > 4f || confRatio >= 0.9f)
-                    requiredFrames = 2;
-                else if (confRatio < 0.6f)
-                    requiredFrames = 5;
-                else
-                    requiredFrames = 3;
-
-                float stickyThreshold = (float)_fcStickyThreshold;
-                bool aimTargetVeryCentered = nearestToCrosshairDistSq < (stickyThreshold * stickyThreshold * 0.25f);
-
-                if ((aimTargetVeryCentered && confRatio >= 0.6f) || _framesWithoutMatch >= requiredFrames)
-                    return AcquireNewTarget(aimTarget);
-
-                UpdateMotion(trackedMatch, sizeFactor);
+                _trackAge++;
+                int missed = _consecutiveFramesWithoutTarget;
+                _consecutiveFramesWithoutTarget = 0;
+                UpdateMotion(trackedMatch, sizeFactor, missed);
                 _currentTarget = trackedMatch;
                 return trackedMatch;
             }
 
-            _framesWithoutMatch++;
-            float thresh = (float)_fcStickyThreshold;
-            if (nearestToCrosshairDistSq < (thresh * thresh * 0.25f) || _framesWithoutMatch >= 3)
-                return AcquireNewTarget(aimTarget);
-
-            return null;
+            return HandleNoDetections();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1008,15 +1072,19 @@ namespace Venkatesh2.AILogic
                 float velMag = MathF.Sqrt(_lastTargetVelocityX * _lastTargetVelocityX + _lastTargetVelocityY * _lastTargetVelocityY);
                 float lastArea = _currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height;
                 bool closeRange = lastArea > IMAGE_SIZE * IMAGE_SIZE * 0.15f;
-                int dynamicGrace = velMag > 5f ? 6 : velMag > 2f ? 4 : closeRange ? 4 : 2;
+                int ageBonus = Math.Min(_trackAge / 10, 3);
+                int dynamicGrace = (velMag > 5f ? 6 : velMag > 2f ? 4 : closeRange ? 4 : 2) + ageBonus;
 
                 if (++_consecutiveFramesWithoutTarget <= dynamicGrace)
                 {
                     float t = _consecutiveFramesWithoutTarget;
                     float decayRate = 1f / (dynamicGrace + 1);
-                    _gracePrediction.ScreenCenterX      = _currentTarget.ScreenCenterX + _lastTargetVelocityX * t + 0.5f * _lastTargetAccelX * t * t;
-                    _gracePrediction.ScreenCenterY      = _currentTarget.ScreenCenterY + _lastTargetVelocityY * t + 0.5f * _lastTargetAccelY * t * t;
-                    _gracePrediction.Rectangle          = _currentTarget.Rectangle;
+                    float extraX = _lastTargetVelocityX * t + 0.5f * _lastTargetAccelX * t * t;
+                    float extraY = _lastTargetVelocityY * t + 0.5f * _lastTargetAccelY * t * t;
+                    var lastRect = _currentTarget.Rectangle;
+                    _gracePrediction.ScreenCenterX      = _currentTarget.ScreenCenterX + extraX;
+                    _gracePrediction.ScreenCenterY      = _currentTarget.ScreenCenterY + extraY;
+                    _gracePrediction.Rectangle          = new RectangleF(lastRect.X + extraX, lastRect.Y + extraY, lastRect.Width, lastRect.Height);
                     _gracePrediction.Confidence         = _currentTarget.Confidence * (1f - t * decayRate);
                     _gracePrediction.ClassId            = _currentTarget.ClassId;
                     _gracePrediction.ClassName          = _currentTarget.ClassName;
@@ -1036,23 +1104,24 @@ namespace Venkatesh2.AILogic
             _lastTargetVelocityY = 0f;
             _lastTargetAccelX = 0f;
             _lastTargetAccelY = 0f;
-            _framesWithoutMatch = 0;
+            _trackAge = 0;
             _currentTarget = target;
             return target;
         }
 
-        private void UpdateMotion(Prediction newTarget, float sizeFactor)
+        private void UpdateMotion(Prediction newTarget, float sizeFactor, int missedFrames = 0)
         {
             if (_currentTarget == null) return;
 
-            float newVelX = newTarget.ScreenCenterX - _currentTarget.ScreenCenterX;
-            float newVelY = newTarget.ScreenCenterY - _currentTarget.ScreenCenterY;
+            float elapsed = missedFrames + 1f;
+            float newVelX = (newTarget.ScreenCenterX - _currentTarget.ScreenCenterX) / elapsed;
+            float newVelY = (newTarget.ScreenCenterY - _currentTarget.ScreenCenterY) / elapsed;
 
             float newAccelX = newVelX - _lastTargetVelocityX;
             float newAccelY = newVelY - _lastTargetVelocityY;
 
-            float predX = _currentTarget.ScreenCenterX + _lastTargetVelocityX + 0.5f * _lastTargetAccelX;
-            float predY = _currentTarget.ScreenCenterY + _lastTargetVelocityY + 0.5f * _lastTargetAccelY;
+            float predX = _currentTarget.ScreenCenterX + _lastTargetVelocityX * elapsed + 0.5f * _lastTargetAccelX * elapsed * elapsed;
+            float predY = _currentTarget.ScreenCenterY + _lastTargetVelocityY * elapsed + 0.5f * _lastTargetAccelY * elapsed * elapsed;
             float predErrorSq = GetDistanceSq(newTarget.ScreenCenterX, newTarget.ScreenCenterY, predX, predY);
             float errorNorm = predErrorSq / Math.Max(MathF.Sqrt(_currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height), 10f);
 
@@ -1070,7 +1139,7 @@ namespace Venkatesh2.AILogic
         {
             _currentTarget = null;
             _consecutiveFramesWithoutTarget = 0;
-            _framesWithoutMatch = 0;
+            _trackAge = 0;
             _lastTargetVelocityX = 0f;
             _lastTargetVelocityY = 0f;
             _lastTargetAccelX = 0f;
@@ -1095,7 +1164,11 @@ namespace Venkatesh2.AILogic
 
             int nd = NUM_DETECTIONS;
             int imageSize = IMAGE_SIZE;
-            float invImageSize = 1.0f / imageSize; // precomputed reciprocal — replaces 2 divisions per detected box
+            float invImageSize = 1.0f / imageSize;
+            float fovCenterX = imageSize * 0.5f;
+            float fovCenterY = imageSize * 0.5f;
+            float fovRadius = (fovMaxX - fovMinX) * 0.5f;
+            float fovRadiusSq = fovRadius * fovRadius;
             _kdPredictions.Clear();
             var KDpredictions = _kdPredictions;
 
@@ -1157,9 +1230,9 @@ namespace Venkatesh2.AILogic
                     float x_max = x_center + halfW;
                     float y_max = y_center + halfH;
 
-                    // Check center point only — a close/large enemy whose box overflows the FOV
-                    // boundary is still a valid target; filtering by corners drops them mid-track.
-                    if (x_center < fovMinX || x_center > fovMaxX || y_center < fovMinY || y_center > fovMaxY) continue;
+                    float fdx = x_center - fovCenterX;
+                    float fdy = y_center - fovCenterY;
+                    if (fdx * fdx + fdy * fdy > fovRadiusSq) continue;
 
                     KDpredictions.Add(new Prediction
                     {
@@ -1174,6 +1247,7 @@ namespace Venkatesh2.AILogic
                     });
                 }
 
+                ApplyGreedyNMS(KDpredictions, 0.45f);
                 return KDpredictions;
             }
 
@@ -1217,7 +1291,11 @@ namespace Venkatesh2.AILogic
                 float x_max = x_center + width / 2;
                 float y_max = y_center + height / 2;
 
-                if (x_center < fovMinX || x_center > fovMaxX || y_center < fovMinY || y_center > fovMaxY) continue;
+                {
+                    float fdx = x_center - fovCenterX;
+                    float fdy = y_center - fovCenterY;
+                    if (fdx * fdx + fdy * fdy > fovRadiusSq) continue;
+                }
 
                 KDpredictions.Add(new Prediction
                 {
@@ -1232,7 +1310,26 @@ namespace Venkatesh2.AILogic
                 });
             }
 
+            ApplyGreedyNMS(KDpredictions, 0.45f);
             return KDpredictions;
+        }
+
+        private static void ApplyGreedyNMS(List<Prediction> predictions, float iouThreshold)
+        {
+            if (predictions.Count <= 1) return;
+
+            predictions.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
+
+            for (int i = 0; i < predictions.Count; i++)
+            {
+                var kept = predictions[i];
+                for (int j = predictions.Count - 1; j > i; j--)
+                {
+                    float iou = ComputeIoU(kept.Rectangle, predictions[j].Rectangle);
+                    if (iou > iouThreshold)
+                        predictions.RemoveAt(j);
+                }
+            }
         }
 
         #endregion AI Loop Functions
