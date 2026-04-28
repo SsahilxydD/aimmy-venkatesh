@@ -1,3 +1,4 @@
+using Venkatesh2.AILogic;
 using Venkatesh2.Class;
 using Venkatesh2.MouseMovementLibraries.GHubSupport;
 using Class;
@@ -44,9 +45,6 @@ namespace InputLogic
             return (_t | (~_t)) == -1;
         }
 
-        // ── Move dispatch cache ───────────────────────────────────────────────────────────
-        // Cached method → index so we pay one string comparison per frame instead of
-        // a full Dictionary hash lookup + 5 string comparisons inside _dispatchMove.
         private static string _cachedDispMM = "";
         private static int _cachedDispIdx = 5;
 
@@ -55,14 +53,14 @@ namespace InputLogic
             bool _op = _opP();
             uint _jv = unchecked((uint)(_x ^ _y)) & 0u; _ = _jv;
 
-            string _mm = Convert.ToString(Dictionary.dropdownState["Mouse Movement Method"]) ?? "Mouse Event";
+            string _mm = Convert.ToString(Dictionary.dropdownState[_xB9D2._c1B]) ?? _xB9D2._c1C;
             if (_mm != _cachedDispMM)
             {
                 _cachedDispMM = _mm;
-                _cachedDispIdx = _mm == "SendInput" ? 1
-                               : _mm == "LG HUB" ? 2
-                               : _mm == "Razer Synapse (Require Razer Peripheral)" ? 3
-                               : _mm == "ddxoft Virtual Input Driver" ? 4 : 5;
+                _cachedDispIdx = _mm == _xB9D2._c1D ? 1
+                               : _mm == _xB9D2._c1E ? 2
+                               : _mm == _xB9D2._c1F ? 3
+                               : _mm == _xB9D2._c20 ? 4 : 5;
             }
 
             int _st = _cachedDispIdx;
@@ -79,9 +77,6 @@ namespace InputLogic
             }
         }
 
-        // ── Movement path cache ───────────────────────────────────────────────────────────
-        // Path string looked up once per settings change, not per frame.
-        // 1=CubicBezier 2=Lerp 3=Exponential 4=Adaptive 5=PerlinNoise 6=VelocityDamped 7=Direct
         private static string _cachedPath = "";
         private static int _pathIdx = 2;
 
@@ -93,7 +88,7 @@ namespace InputLogic
             double _tX = _dX - _sW / 2.0;
             double _tY = _dY - _sW / 2.0;
 
-            double _jS = Convert.ToDouble(Dictionary.sliderSettings["Mouse Jitter"]);
+            double _jS = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c21]);
             double _jX = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
             double _jY = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
 
@@ -101,18 +96,17 @@ namespace InputLogic
             Point _e = new((int)_tX, (int)_tY);
             Point _nP = new(0, 0);
 
-            // Refresh cached path index if setting changed.
-            string _mp = Convert.ToString(Dictionary.dropdownState["Movement Path"]) ?? "Lerp";
+            string _mp = Convert.ToString(Dictionary.dropdownState[_xB9D2._c22]) ?? _xB9D2._c23;
             if (_mp != _cachedPath)
             {
                 _cachedPath = _mp;
-                _pathIdx = _mp == "Cubic Bezier"     ? 1
-                         : _mp == "Exponential"      ? 3
-                         : _mp == "Adaptive"         ? 4
-                         : _mp == "Perlin Noise"     ? 5
-                         : _mp == "Velocity-Damped"  ? 6
-                         : _mp == "Direct"           ? 7
-                         : 2; // default: Lerp
+                _pathIdx = _mp == _xB9D2._c24 ? 1
+                         : _mp == _xB9D2._c25 ? 3
+                         : _mp == _xB9D2._c26 ? 4
+                         : _mp == _xB9D2._c27 ? 5
+                         : _mp == _xB9D2._c28 ? 6
+                         : _mp == _xB9D2._c29 ? 7
+                         : 2;
             }
 
             int _st = 0;
@@ -129,31 +123,31 @@ namespace InputLogic
                         int _pyOff =  (_e.X - _s.X) / 4;
                         Point _c1 = new(_s.X + (_e.X - _s.X) / 3 + _pxOff, _s.Y + (_e.Y - _s.Y) / 3 + _pyOff);
                         Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3 - _pxOff, _s.Y + 2 * (_e.Y - _s.Y) / 3 - _pyOff);
-                        _nP = MovementPaths.CubicBezier(_s, _e, _c1, _c2, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
+                        _nP = MovementPaths._mB03(_s, _e, _c1, _c2, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]));
                         _st = 11; break;
 
                     case 2:
-                        _nP = MovementPaths.Lerp(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
+                        _nP = MovementPaths._mL04(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]));
                         _st = 11; break;
 
                     case 3:
-                        _nP = MovementPaths.Exponential(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]), 3.0);
+                        _nP = MovementPaths._mE05(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]), 3.0);
                         _st = 11; break;
 
                     case 4:
-                        _nP = MovementPaths.Adaptive(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
+                        _nP = MovementPaths._mA06(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]));
                         _st = 11; break;
 
                     case 5:
-                        _nP = MovementPaths.PerlinNoise(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]), 20, 0.5);
+                        _nP = MovementPaths._mP07(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]), 20, 0.5);
                         _st = 11; break;
 
                     case 6:
-                        _nP = MovementPaths.VelocityDamped(_e, Convert.ToDouble(Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]));
+                        _nP = MovementPaths._mV02(_e, Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]));
                         _st = 11; break;
 
                     case 7:
-                        _nP = MovementPaths.Direct(_e);
+                        _nP = MovementPaths._mD01(_e);
                         _st = 11; break;
 
                     case 11:

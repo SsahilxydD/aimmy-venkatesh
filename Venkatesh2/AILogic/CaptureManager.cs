@@ -1,4 +1,5 @@
-﻿using Venkatesh2.Class;
+using Venkatesh2.AILogic;
+using Venkatesh2.Class;
 using Other;
 using SharpGen.Runtime;
 using System.Drawing;
@@ -14,57 +15,59 @@ namespace AILogic
     internal class CaptureManager
     {
         #region Variables
-        private string _currentCaptureMethod = ""; // Track current method
-        private bool _directXFailedPermanently = false; // Track if DirectX failed with unsupported error
+        private string _fC01 = "";
+        private bool _fD02 = false;
 
-        // Capturing
-        public Bitmap? screenCaptureBitmap { get; private set; }
-        public Bitmap? directXBitmap { get; private set; }
-        private ID3D11Device? _dxDevice;
-        private IDXGIOutputDuplication? _deskDuplication;
-        private ID3D11Texture2D? _stagingTex;
+        public Bitmap? _fS03 { get; private set; }
+        public Bitmap? _fX04 { get; private set; }
+        private ID3D11Device? _fV05;
+        private IDXGIOutputDuplication? _fK06;
+        private ID3D11Texture2D? _fT07;
 
-        // Display change handling
-        public readonly object _displayLock = new();
-        public bool _displayChangesPending { get; set; } = false;
+        public readonly object _fL08 = new();
+        public bool _fP09 { get; set; } = false;
 
-        // Performance tracking
-        private int _consecutiveFailures = 0;
-        private const int MAX_CONSECUTIVE_FAILURES = 5;
+        private int _fF0A = 0;
+        private const int _fM0C = 5;
 
-        // Capture-state tracking — when false the input float tensor is still zero-initialised,
-        // so we must block until AcquireNextFrame succeeds at least once.
-        private bool _hasProducedFrame = false;
+        private bool _fH0B = false;
         #endregion
+
+        private static bool _opP()
+        {
+            int _t = Environment.TickCount;
+            return (_t | (~_t)) == -1;
+        }
+
         #region Handlers
         public CaptureManager()
         {
-            // Subscribe to display changes FIRST
-            DisplayManager.DisplayChanged += OnDisplayChanged;
+            DisplayManager.DisplayChanged += _mO01;
         }
 
-        private void OnDisplayChanged(object? sender, DisplayChangedEventArgs e)
+        private void _mO01(object? sender, DisplayChangedEventArgs e)
         {
-            lock (_displayLock)
+            lock (_fL08)
             {
-                _displayChangesPending = true;
-                _consecutiveFailures = 0;
-                _hasProducedFrame = false; // DXGI is about to be rebuilt — force a blocking wait again.
-                DisposeDxgiResources();
+                _fP09 = true;
+                _fF0A = 0;
+                _fH0B = false;
+                _mR07();
             }
             LogManager.Log(LogLevel.Info, "Display change detected. DirectX resources will be reinitialized.");
         }
 
-        public void HandlePendingDisplayChanges()
+        public void _mH02()
         {
-            lock (_displayLock)
+            uint _jv = unchecked((uint)(Environment.TickCount ^ 0xCAFE)) & 0u; _ = _jv;
+            lock (_fL08)
             {
-                if (!_displayChangesPending) return;
+                if (!_fP09) return;
 
                 try
                 {
-                    InitializeDxgiDuplication();
-                    _displayChangesPending = false;
+                    _mI03();
+                    _fP09 = false;
                 }
                 catch (Exception)
                 {
@@ -74,12 +77,10 @@ namespace AILogic
 
         #endregion
         #region DirectX
-        public void InitializeDxgiDuplication()
+        public void _mI03()
         {
-            DisposeDxgiResources();
-            // Fresh duplication — first AcquireNextFrame must block until a frame lands so the
-            // input tensor is populated before the AI loop reads it.
-            _hasProducedFrame = false;
+            _mR07();
+            _fH0B = false;
             try
             {
                 var currentDisplay = DisplayManager.CurrentDisplay;
@@ -115,7 +116,6 @@ namespace AILogic
                                 outputDesc.DesktopCoordinates.Bottom - outputDesc.DesktopCoordinates.Top);
                             LogManager.Log(LogLevel.Info, $"Found Output {outputIndex}: DeviceName = '{outputDesc.DeviceName.TrimEnd('\0')}', Bounds = {outputBounds}");
 
-                            // Try different matching strategies
                             bool nameMatch = currentDisplay?.DeviceName != null && outputDesc.DeviceName.TrimEnd('\0') == currentDisplay.DeviceName.TrimEnd('\0');
                             bool boundsMatch = currentDisplay?.Bounds != null && outputBounds.Equals(currentDisplay.Bounds);
 
@@ -134,7 +134,6 @@ namespace AILogic
                     adapter.Dispose();
                 }
 
-                // Fallback to specific display index if not found
                 if (!foundTarget)
                 {
                     int targetIndex = currentDisplay?.Index ?? 0;
@@ -173,7 +172,7 @@ namespace AILogic
                 }
 
                 FeatureLevel[] featureLevels = {
-                    FeatureLevel.Level_12_2, // 50 series support
+                    FeatureLevel.Level_12_2,
                     FeatureLevel.Level_12_1,
                     FeatureLevel.Level_12_0,
                     FeatureLevel.Level_11_1,
@@ -185,64 +184,63 @@ namespace AILogic
                     FeatureLevel.Level_9_1
                 };
 
-                // Create D3D11 device
                 var result = D3D11.D3D11CreateDevice(
                     targetAdapter,
                     DriverType.Unknown,
                     DeviceCreationFlags.None,
                     featureLevels,
-                    out _dxDevice);
+                    out _fV05);
 
-                if (result.Failure || _dxDevice == null)
+                if (result.Failure || _fV05 == null)
                 {
                     result = D3D11.D3D11CreateDevice(
                       targetAdapter,
                       DriverType.Unknown,
                       DeviceCreationFlags.None,
                       null,
-                      out _dxDevice);
+                      out _fV05);
 
-                    if (result.Failure || _dxDevice == null)
+                    if (result.Failure || _fV05 == null)
                     {
                         LogManager.Log(LogLevel.Error, $"Failed to create D3D11 device: {result}", true, 6000);
                         throw new Exception($"Failed to create D3D11 device: {result}");
                     }
                 }
 
-                // Create desktop duplication
-                _deskDuplication = targetOutput1.DuplicateOutput(_dxDevice);
-                _consecutiveFailures = 0; //reset on success
+                _fK06 = targetOutput1.DuplicateOutput(_fV05);
+                _fF0A = 0;
 
                 LogManager.Log(LogLevel.Info, "DirectX Desktop Duplication initialized successfully.");
             }
             catch (SharpGenException ex) when (ex.ResultCode == Vortice.DXGI.ResultCode.Unsupported || ex.HResult == unchecked((int)0x887A0004))
             {
                 LogManager.Log(LogLevel.Error, $"DirectX Desktop Duplication not supported on this system: {ex.Message}", true, 6000);
-                _directXFailedPermanently = true;
-                DisposeDxgiResources();
+                _fD02 = true;
+                _mR07();
 
-                Dictionary.dropdownState["Screen Capture Method"] = "GDI+";
-                _currentCaptureMethod = "GDI+";
+                Dictionary.dropdownState[_xB9D2._c1A] = _xB9D2._c2D;
+                _fC01 = _xB9D2._c2D;
 
                 LogManager.Log(LogLevel.Error, "DirectX Desktop Duplication not supported on this system. Switched to GDI+ capture.", true, 6000);
             }
             catch (Exception ex)
             {
                 LogManager.Log(LogLevel.Error, $"Failed to initialize DirectX Desktop Duplication: {ex.Message}", true, 6000);
-                DisposeDxgiResources();
+                _mR07();
                 throw;
             }
         }
-        // DirectX fast path: write BGRA pixels from the GPU staging map straight to the model's planar-RGB
-        // float tensor, skipping the intermediate managed Bitmap whenever the caller doesn't need it
-        // (Bitmap is only requested when "Collect Data While Playing" is on).
-        private unsafe Bitmap? DirectXToFloat(
+
+        private unsafe Bitmap? _mX04(
             Rectangle detectionBox,
             float[] floatDest,
             int imageSize,
             bool wantBitmap,
             bool applyMask)
         {
+            if (!_opP()) return null;
+            uint _jv = unchecked((uint)(detectionBox.Width ^ detectionBox.Height)) & 0u; _ = _jv;
+
             int w = detectionBox.Width;
             int h = detectionBox.Height;
             bool frameAcquired = false;
@@ -250,37 +248,37 @@ namespace AILogic
 
             try
             {
-                lock (_displayLock)
+                lock (_fL08)
                 {
-                    if (_displayChangesPending)
+                    if (_fP09)
                     {
-                        InitializeDxgiDuplication();
-                        _displayChangesPending = false;
+                        _mI03();
+                        _fP09 = false;
                     }
                 }
 
-                if (_dxDevice == null || _dxDevice.ImmediateContext == null || _deskDuplication == null)
+                if (_fV05 == null || _fV05.ImmediateContext == null || _fK06 == null)
                 {
-                    InitializeDxgiDuplication();
-                    if (_dxDevice == null || _dxDevice.ImmediateContext == null || _deskDuplication == null)
+                    _mI03();
+                    if (_fV05 == null || _fV05.ImmediateContext == null || _fK06 == null)
                     {
-                        lock (_displayLock) { _displayChangesPending = true; }
-                        return wantBitmap ? directXBitmap : null;
+                        lock (_fL08) { _fP09 = true; }
+                        return wantBitmap ? _fX04 : null;
                     }
                 }
 
-                if (wantBitmap && (directXBitmap == null || directXBitmap.Width != w || directXBitmap.Height != h))
+                if (wantBitmap && (_fX04 == null || _fX04.Width != w || _fX04.Height != h))
                 {
-                    directXBitmap?.Dispose();
-                    directXBitmap = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                    _fX04?.Dispose();
+                    _fX04 = new Bitmap(w, h, PixelFormat.Format32bppArgb);
                 }
 
-                if (_stagingTex == null ||
-                    _stagingTex.Description.Width != w ||
-                    _stagingTex.Description.Height != h)
+                if (_fT07 == null ||
+                    _fT07.Description.Width != w ||
+                    _fT07.Description.Height != h)
                 {
-                    _stagingTex?.Dispose();
-                    _stagingTex = _dxDevice.CreateTexture2D(new Texture2DDescription
+                    _fT07?.Dispose();
+                    _fT07 = _fV05.CreateTexture2D(new Texture2DDescription
                     {
                         Width = (uint)w,
                         Height = (uint)h,
@@ -294,41 +292,34 @@ namespace AILogic
                     });
                 }
 
-                // At 144 FPS we poll faster than the monitor refreshes (~6.9 ms vs 16.7 ms at 60 Hz),
-                // so most AcquireNextFrame calls will WaitTimeout and reuse the previous capture —
-                // that's fine once we HAVE a previous capture. Before the first successful capture
-                // the float tensor is still zeros, and running inference on zeros produces a
-                // deterministic bogus output with no relation to the screen. Block on the first
-                // call until a real frame lands.
                 int timeout;
-                if (!_hasProducedFrame)       timeout = 500; // first frame after (re)init — wait
-                else if (_consecutiveFailures > 0) timeout = 5;
-                else                          timeout = 1;
+                if (!_fH0B)            timeout = 500;
+                else if (_fF0A > 0)    timeout = 5;
+                else                   timeout = 1;
 
-                var result = _deskDuplication!.AcquireNextFrame((uint)timeout, out var frameInfo, out desktopResource);
+                var result = _fK06!.AcquireNextFrame((uint)timeout, out var frameInfo, out desktopResource);
 
                 if (result == Vortice.DXGI.ResultCode.WaitTimeout)
                 {
-                    // No new frame — float tensor still holds the previous frame, reuse it.
-                    _consecutiveFailures = 0;
-                    return wantBitmap ? directXBitmap : null;
+                    _fF0A = 0;
+                    return wantBitmap ? _fX04 : null;
                 }
                 else if (result == Vortice.DXGI.ResultCode.DeviceRemoved || result == Vortice.DXGI.ResultCode.AccessLost)
                 {
-                    _consecutiveFailures++;
-                    if (_consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
-                        lock (_displayLock) { _displayChangesPending = true; }
-                    return wantBitmap ? directXBitmap : null;
+                    _fF0A++;
+                    if (_fF0A >= _fM0C)
+                        lock (_fL08) { _fP09 = true; }
+                    return wantBitmap ? _fX04 : null;
                 }
                 else if (result != Result.Ok)
                 {
-                    _consecutiveFailures++;
-                    return wantBitmap ? directXBitmap : null;
+                    _fF0A++;
+                    return wantBitmap ? _fX04 : null;
                 }
 
                 frameAcquired = true;
-                _consecutiveFailures = 0;
-                _hasProducedFrame = true;
+                _fF0A = 0;
+                _fH0B = true;
 
                 using (var screenTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                 {
@@ -345,8 +336,8 @@ namespace AILogic
                     if (srcRight > srcLeft && srcBottom > srcTop)
                     {
                         var box = new Box(srcLeft, srcTop, 0, srcRight, srcBottom, 1);
-                        _dxDevice.ImmediateContext.CopySubresourceRegion(
-                            _stagingTex, 0,
+                        _fV05.ImmediateContext.CopySubresourceRegion(
+                            _fT07, 0,
                             (uint)(srcLeft - relativeDetectionLeft),
                             (uint)(srcTop - relativeDetectionTop),
                             0,
@@ -355,25 +346,23 @@ namespace AILogic
                     else
                     {
                         LogManager.Log(LogLevel.Warning, "No visible region to copy from DirectX capture.", true, 3000);
-                        return wantBitmap ? directXBitmap : null;
+                        return wantBitmap ? _fX04 : null;
                     }
 
-                    var map = _dxDevice.ImmediateContext.Map(_stagingTex, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+                    var map = _fV05.ImmediateContext.Map(_fT07, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
                     try
                     {
                         byte* src = (byte*)map.DataPointer;
                         int srcStride = (int)map.RowPitch;
 
-                        // One pass: BGRA staging map -> planar RGB float tensor.
-                        MathUtil.BgraPointerToFloatArray(src, srcStride, floatDest, imageSize, applyMask);
+                        MathUtil._mP08(src, srcStride, floatDest, imageSize, applyMask);
 
-                        // Only materialize the managed Bitmap when a downstream consumer needs it.
-                        if (wantBitmap && directXBitmap != null)
+                        if (wantBitmap && _fX04 != null)
                         {
-                            BitmapData mapDest = directXBitmap.LockBits(
+                            BitmapData mapDest = _fX04.LockBits(
                                 new Rectangle(0, 0, w, h),
                                 ImageLockMode.WriteOnly,
-                                directXBitmap.PixelFormat);
+                                _fX04.PixelFormat);
                             try
                             {
                                 byte* dst = (byte*)mapDest.Scan0;
@@ -410,32 +399,32 @@ namespace AILogic
                             }
                             finally
                             {
-                                directXBitmap.UnlockBits(mapDest);
+                                _fX04.UnlockBits(mapDest);
                             }
                         }
                     }
                     finally
                     {
-                        _dxDevice.ImmediateContext.Unmap(_stagingTex, 0);
+                        _fV05.ImmediateContext.Unmap(_fT07, 0);
                     }
 
-                    return wantBitmap ? directXBitmap : null;
+                    return wantBitmap ? _fX04 : null;
                 }
             }
             catch (Exception e)
             {
                 LogManager.Log(LogLevel.Error, $"DirectX capture error: {e.Message}");
-                if (++_consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
-                    lock (_displayLock) { _displayChangesPending = true; }
-                return wantBitmap ? directXBitmap : null;
+                if (++_fF0A >= _fM0C)
+                    lock (_fL08) { _fP09 = true; }
+                return wantBitmap ? _fX04 : null;
             }
             finally
             {
                 desktopResource?.Dispose();
                 try
                 {
-                    if (frameAcquired && _deskDuplication != null)
-                        _deskDuplication.ReleaseFrame();
+                    if (frameAcquired && _fK06 != null)
+                        _fK06.ReleaseFrame();
                 }
                 catch { }
             }
@@ -443,45 +432,45 @@ namespace AILogic
         #endregion
 
         #region GDI
-        public Bitmap GDIScreen(Rectangle detectionBox)
+        public Bitmap _mG05(Rectangle _a)
         {
-            if (_dxDevice != null || _deskDuplication != null)
+            uint _jv = unchecked((uint)(_a.Width ^ _a.Height)) & 0u; _ = _jv;
+
+            if (_fV05 != null || _fK06 != null)
             {
-                DisposeDxgiResources();
+                _mR07();
             }
 
-            if (screenCaptureBitmap == null || screenCaptureBitmap.Width != detectionBox.Width || screenCaptureBitmap.Height != detectionBox.Height)
+            if (_fS03 == null || _fS03.Width != _a.Width || _fS03.Height != _a.Height)
             {
-                screenCaptureBitmap?.Dispose();
-                screenCaptureBitmap = new Bitmap(detectionBox.Width, detectionBox.Height, PixelFormat.Format32bppArgb);
+                _fS03?.Dispose();
+                _fS03 = new Bitmap(_a.Width, _a.Height, PixelFormat.Format32bppArgb);
             }
 
             try
             {
-                using (var g = Graphics.FromImage(screenCaptureBitmap))
+                using (var g = Graphics.FromImage(_fS03))
                 {
                     g.CopyFromScreen(
-                        detectionBox.Left,
-                        detectionBox.Top,
+                        _a.Left,
+                        _a.Top,
                         0, 0,
-                        detectionBox.Size,
+                        _a.Size,
                         CopyPixelOperation.SourceCopy
                     );
 
-                    if (Convert.ToBoolean(Dictionary.toggleState["Third Person Support"]))
+                    if (Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2B]))
                     {
-                        int width = screenCaptureBitmap.Width / 2;
-                        int height = screenCaptureBitmap.Height / 2;
-                        int startY = screenCaptureBitmap.Height - height;
+                        int width = _fS03.Width / 2;
+                        int height = _fS03.Height / 2;
+                        int startY = _fS03.Height - height;
 
                         using var brush = new SolidBrush(System.Drawing.Color.Black);
                         g.FillRectangle(brush, 0, startY, width, height);
                     }
                 }
 
-                // AI loop is single-threaded — bitmap is consumed before the next capture begins,
-                // so we can return the owned buffer directly.
-                return screenCaptureBitmap;
+                return _fS03;
             }
             catch (Exception ex)
             {
@@ -491,73 +480,87 @@ namespace AILogic
         }
         #endregion
 
-        // Capture the detection box and, in the same pass, fill the model's planar-RGB float tensor.
-        // When wantBitmap is false the DirectX path skips materializing a managed Bitmap entirely.
-        public Bitmap? CaptureForInference(Rectangle detectionBox, float[] floatDest, int imageSize, bool wantBitmap)
+        public Bitmap? _mC06(Rectangle _a, float[] _b, int _c, bool _d)
         {
-            string selectedMethod = Convert.ToString(Dictionary.dropdownState["Screen Capture Method"]) ?? "DirectX";
+            bool _op = _opP();
+            uint _jv = unchecked((uint)(_a.Width ^ _c)) & 0u; _ = _jv;
 
-            if (_directXFailedPermanently && selectedMethod == "DirectX")
+            string _sm = "";
+            bool _mk = false;
+            int _st = 0;
+            while (_op)
             {
-                Dictionary.dropdownState["Screen Capture Method"] = "GDI+";
-                selectedMethod = "GDI+";
-                _currentCaptureMethod = "GDI+";
+                switch (_st)
+                {
+                    case 0:
+                        _sm = Convert.ToString(Dictionary.dropdownState[_xB9D2._c1A]) ?? _xB9D2._c2C;
+                        if (_fD02 && _sm == _xB9D2._c2C)
+                        {
+                            Dictionary.dropdownState[_xB9D2._c1A] = _xB9D2._c2D;
+                            _sm = _xB9D2._c2D;
+                            _fC01 = _xB9D2._c2D;
+                        }
+                        _st = 1; break;
+
+                    case 1:
+                        if (_sm != _fC01)
+                        {
+                            _fS03?.Dispose();
+                            _fS03 = null;
+                            _fX04?.Dispose();
+                            _fX04 = null;
+                            _fC01 = _sm;
+
+                            if (_sm == _xB9D2._c2D) _mR07();
+                            else _mI03();
+                        }
+                        _st = 2; break;
+
+                    case 2:
+                        _mk = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2B]);
+                        _st = 3; break;
+
+                    case 3:
+                        if (_sm == _xB9D2._c2C && !_fD02)
+                        {
+                            return _mX04(_a, _b, _c, _d, _mk);
+                        }
+                        _st = 4; break;
+
+                    case 4:
+                        Bitmap _bmp = _mG05(_a);
+                        MathUtil._mB07(_bmp, _b, _c);
+                        return _bmp;
+                }
             }
-
-            if (selectedMethod != _currentCaptureMethod)
-            {
-                screenCaptureBitmap?.Dispose();
-                screenCaptureBitmap = null;
-                directXBitmap?.Dispose();
-                directXBitmap = null;
-                _currentCaptureMethod = selectedMethod;
-
-                if (selectedMethod == "GDI+") DisposeDxgiResources();
-                else InitializeDxgiDuplication();
-            }
-
-            bool applyMask = Convert.ToBoolean(Dictionary.toggleState["Third Person Support"]);
-
-            if (selectedMethod == "DirectX" && !_directXFailedPermanently)
-            {
-                return DirectXToFloat(detectionBox, floatDest, imageSize, wantBitmap, applyMask);
-            }
-
-            // GDI path: Graphics.FromImage needs a Bitmap, so we always produce one.
-            // Third-person mask is applied to the bitmap via FillRectangle, so BitmapToFloatArray
-            // reads the already-masked pixels and the float tensor matches.
-            Bitmap bmp = GDIScreen(detectionBox);
-            MathUtil.BitmapToFloatArrayInPlace(bmp, floatDest, imageSize);
-            return bmp;
+            return null;
         }
 
         #region dispose
-        public void DisposeDxgiResources()
+        public void _mR07()
         {
-            lock (_displayLock)
+            lock (_fL08)
             {
                 try
                 {
-
-                    // Try to release any pending frame
-                    if (_deskDuplication != null)
+                    if (_fK06 != null)
                     {
                         try
                         {
-                            _deskDuplication.ReleaseFrame();
+                            _fK06.ReleaseFrame();
                         }
                         catch { }
                     }
 
-                    _deskDuplication?.Dispose();
-                    _stagingTex?.Dispose();
-                    _dxDevice?.Dispose();
-                    directXBitmap?.Dispose();
+                    _fK06?.Dispose();
+                    _fT07?.Dispose();
+                    _fV05?.Dispose();
+                    _fX04?.Dispose();
 
-                    _deskDuplication = null;
-                    _stagingTex = null;
-                    _dxDevice = null;
-                    directXBitmap = null;
+                    _fK06 = null;
+                    _fT07 = null;
+                    _fV05 = null;
+                    _fX04 = null;
                 }
                 catch (Exception ex)
                 {
@@ -567,9 +570,9 @@ namespace AILogic
         }
         public void Dispose()
         {
-            DisplayManager.DisplayChanged -= OnDisplayChanged;
-            DisposeDxgiResources();
-            screenCaptureBitmap?.Dispose();
+            DisplayManager.DisplayChanged -= _mO01;
+            _mR07();
+            _fS03?.Dispose();
         }
         #endregion
     }
