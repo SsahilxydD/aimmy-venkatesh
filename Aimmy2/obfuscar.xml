@@ -1,0 +1,40 @@
+<?xml version='1.0'?>
+<Obfuscator>
+  <Var name="InPath" value="C:\Users\Administrator\Desktop\aimmy-venkatesh\Aimmy2\bin\x64\Release\net8.0-windows" />
+  <Var name="OutPath" value="C:\Users\Administrator\Desktop\aimmy-venkatesh\Aimmy2\bin\x64\Release\net8.0-windows\obfuscated" />
+  <Var name="HideStrings" value="true" />
+  <Var name="RenameProperties" value="true" />
+  <Var name="RenameEvents" value="true" />
+  <Var name="RenameFields" value="true" />
+  <Var name="ReuseNames" value="true" />
+  <Var name="UseUnicodeNames" value="true" />
+  <Var name="KeepPublicApi" value="false" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="OptimizeMethods" value="true" />
+
+  <AssemblySearchPath path="C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\8.0.26" />
+  <AssemblySearchPath path="C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.26" />
+
+  <Module file="$(InPath)\Xeno.dll">
+    <!-- Skip WPF UI namespaces — resolved by reflection at runtime -->
+    <SkipNamespace name="Aimmy2" />
+    <SkipNamespace name="Aimmy2.UILibrary" />
+    <SkipNamespace name="Aimmy2.Controls" />
+    <SkipNamespace name="Aimmy2.Theme" />
+    <SkipNamespace name="Visuality" />
+    <SkipNamespace name="UILibrary" />
+
+    <!-- Skip settings classes — keys accessed by string name -->
+    <SkipNamespace name="Aimmy2.Class" />
+    <SkipNamespace name="Class" />
+
+    <!-- Skip mouse movement libraries — load DLLs by name -->
+    <SkipNamespace name="MouseMovementLibraries.ddxoftSupport" />
+    <SkipNamespace name="MouseMovementLibraries.GHubSupport" />
+    <SkipNamespace name="MouseMovementLibraries.RazerSupport" />
+    <SkipNamespace name="MouseMovementLibraries.SendInputSupport" />
+
+    <!-- Core logic namespaces WILL be obfuscated:
+         AILogic, InputLogic, Other, Aimmy2.AILogic, Aimmy2.Other -->
+  </Module>
+</Obfuscator>
