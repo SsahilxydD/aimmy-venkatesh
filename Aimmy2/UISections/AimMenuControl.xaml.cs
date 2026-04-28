@@ -309,8 +309,6 @@ namespace Aimmy2.Controls
                                 "The Mouse Sensitivity you have set can cause Xeno to be unstable to aim, please increase if you suffer from this problem", true);
                     };
                 }, tooltip: "How fast the aim moves. Lower = faster and snappier, higher = slower and smoother.")
-                .AddSlider("Mouse Jitter", "Jitter", 1, 1, 0, 15, s => uiManager.S_MouseJitter = s,
-                    tooltip: "Adds random small movements to make aim look more human-like.")
                 .AddToggle("Y Axis Percentage Adjustment", t => uiManager.T_YAxisPercentageAdjustment = t,
                     tooltip: "Enable the Y Offset (%) slider to adjust aim vertically by percentage.")
                 .AddToggle("X Axis Percentage Adjustment", t => uiManager.T_XAxisPercentageAdjustment = t,

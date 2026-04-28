@@ -29,7 +29,6 @@ namespace InputLogic
         [DllImport("user32.dll")]
         private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
 
-        private static Random _f0019 = new();
         private static int _dK0 = 0x3FA1;
         private static long _dK1 = 0L;
 
@@ -148,10 +147,6 @@ namespace InputLogic
 
             double aspectRatioCorrection = _f0010 / _f0011;
 
-            int MouseJitter = (int)Dictionary.sliderSettings[_xB9D2._c14];
-            int jitterX = _f0019.Next(-MouseJitter, MouseJitter);
-            int jitterY = _f0019.Next(-MouseJitter, MouseJitter);
-
             Point start = new(0, 0);
             Point end = new(targetX, targetY);
             Point newPosition = new Point(0, 0);
@@ -195,9 +190,6 @@ namespace InputLogic
             if (!_xB9D2._opP()) { _dK1 = _dK0 ^ DateTime.UtcNow.Ticks; newPosition.X = (int)_dK1; return; }
 
             newPosition.Y = (int)(newPosition.Y / aspectRatioCorrection);
-
-            newPosition.X += jitterX;
-            newPosition.Y += jitterY;
 
             string mouseMethod = Dictionary.dropdownState[_xB9D2._c21];
             if (mouseMethod == _xB9D2._c32)

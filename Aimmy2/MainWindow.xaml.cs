@@ -959,7 +959,6 @@ namespace Aimmy2
             {
                 ("FOV Size", uiManager.S_FOVSize, 640.0),
                 ("Mouse Sensitivity (+/-)", uiManager.S_MouseSensitivity, 0.8),
-                ("Mouse Jitter", uiManager.S_MouseJitter, 0.0),
                 ("Sticky Aim Threshold", uiManager.S_StickyAimThreshold, 50),
                 ("EMA Smoothening", uiManager.S_EMASmoothing, 0.5),
                 ("Y Offset (Up/Down)", uiManager.S_YOffset, 0.0),
