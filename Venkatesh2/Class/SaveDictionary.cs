@@ -82,7 +82,6 @@ namespace Class
 
                 foreach (var (key, value) in configuration)
                 {
-                    if (value == null) continue;
                     if (dictionary.ContainsKey(key))
                     {
                         dictionary[key] = value;

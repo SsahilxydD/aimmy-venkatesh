@@ -238,9 +238,9 @@ namespace Venkatesh2.Controls
                     {
                         var value = s.Slider.Value;
                         if (value >= 95)
-                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Venkatesh to be too high and may be unable to detect players.", true);
+                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Aimmy to be too high and may be unable to detect players.", true);
                         else if (value <= 35)
-                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Venkatesh may be too low can cause false positives.", true);
+                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Aimmy may be too low can cause false positives.", true);
                     };
                 }, tooltip: "How sure the AI must be before targeting. Higher = fewer false detections but may miss targets.")
                 .AddToggle("Enable Model Switch Keybind", t => uiManager.T_EnableModelSwitchKeybind = t,
@@ -349,7 +349,7 @@ namespace Venkatesh2.Controls
 
             //--
             var arrowButton = uiManager.ThemeColorWheel.FindName("ArrowButton") as Button;
-            if (arrowButton != null) arrowButton.Visibility = Visibility.Visible;
+            arrowButton.Visibility = Visibility.Visible;
             //--
 
             // Insert before separator
@@ -370,7 +370,7 @@ namespace Venkatesh2.Controls
                     LogManager.Log(LogLevel.Info, $"AI focus switched to Display {e.DisplayIndex + 1} ({e.Bounds.Width}x{e.Bounds.Height})", true);
                     UpdateDisplayRelatedSettings(e);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                 }
             });
@@ -480,7 +480,6 @@ namespace Venkatesh2.Controls
         {
             DisplayManager.DisplayChanged -= OnDisplayChanged;
             AIManager.ClassesUpdated -= OnClassesChanged;
-            AIManager.DynamicModelStatusChanged -= OnDynamicModelStatusChanged;
             _mainWindow?.uiManager.DisplaySelector?.Dispose();
 
             // Save minimize states before disposing

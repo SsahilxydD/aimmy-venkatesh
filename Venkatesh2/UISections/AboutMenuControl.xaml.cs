@@ -306,7 +306,7 @@ namespace Venkatesh2.Controls
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "https://discord.gg/venkatesh",
+                    FileName = "https://discord.gg/aimmy",
                     UseShellExecute = true
                 });
             }

@@ -1,45 +1,39 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace Venkatesh2.MouseMovementLibraries.GHubSupport.dist
 {
-    internal class _x2B8E
+    internal class Properties
     {
         [StructLayout(LayoutKind.Sequential, Pack = 0)]
         public struct OBJECT_ATTRIBUTES : IDisposable
         {
             public int Length;
             public nint RootDirectory;
-            private nint _pObj;
+            private nint objectName;
             public uint Attributes;
             public nint SecurityDescriptor;
             public nint SecurityQualityOfService;
 
-            public OBJECT_ATTRIBUTES(string _nm, uint _at)
+            public OBJECT_ATTRIBUTES(string name, uint attributes)
             {
-                // Opaque dead junk
-                int _jk = unchecked((int)(0xDEADu ^ 0xBEEFu));
-                _ = (_jk >> 4) & 0;
-
                 Length = 0;
                 RootDirectory = nint.Zero;
-                _pObj = nint.Zero;
-                Attributes = _at;
+                objectName = nint.Zero;
+                Attributes = attributes;
                 SecurityDescriptor = nint.Zero;
                 SecurityQualityOfService = nint.Zero;
 
                 Length = Marshal.SizeOf(this);
-                _pObj = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UNICODE_STRING)));
-                _x1A9D._nR(_pObj, _nm);
+                objectName = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UNICODE_STRING)));
+                WinAPI.RtlInitUnicodeString(objectName, name);
             }
 
             public void Dispose()
             {
-                bool _op = (_x1A9D._vQ());
-                if (!_op) { return; } // dead — always false
-                if (_pObj != nint.Zero)
+                if (objectName != nint.Zero)
                 {
-                    Marshal.FreeHGlobal(_pObj);
-                    _pObj = nint.Zero;
+                    Marshal.FreeHGlobal(objectName);
+                    objectName = nint.Zero;
                 }
             }
         }

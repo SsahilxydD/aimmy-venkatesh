@@ -1,6 +1,6 @@
 ﻿using Venkatesh2.Class;
 using Venkatesh2.Theme;
-using VenkateshWPF.Class;
+using AimmyWPF.Class;
 using Class;
 using Other;
 using System.IO;
@@ -49,7 +49,7 @@ namespace Visuality
             ThemeManager.ThemeChanged += OnThemeChanged;
         }
 
-        private void OnThemeChanged(object? sender, Color newColor)
+        private void OnThemeChanged(object sender, Color newColor)
         {
             Dispatcher.Invoke(() =>
             {

@@ -79,6 +79,7 @@
     <PackageReference Include="Vortice.Direct3D12" Version="3.8.2" />
     <PackageReference Include="Vortice.DirectX" Version="3.8.2" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.2" />
+    <PackageReference Include="Supercluster.KDTree" Version="1.0.4" />
     <PackageReference Include="XamlRadialProgressBar" Version="1.0.3" />
   </ItemGroup>
 

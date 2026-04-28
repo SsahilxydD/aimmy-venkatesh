@@ -1,5 +1,5 @@
 ﻿using Venkatesh2.Theme;
-using VenkateshWPF.Class;
+using AimmyWPF.Class;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -38,7 +38,7 @@ namespace Venkatesh2.UILibrary
             this.Unloaded += (s, e) => ThemeManager.ThemeChanged -= OnThemeChanged;
         }
 
-        private void OnThemeChanged(object? sender, Color newThemeColor)
+        private void OnThemeChanged(object sender, Color newThemeColor)
         {
             Application.Current.Dispatcher.BeginInvoke(() => RefreshThemeColors());
         }

@@ -1,12 +1,13 @@
 ﻿using System.Windows;
 using System.Windows.Media.Animation;
 
-namespace VenkateshWPF.Class
+namespace AimmyWPF.Class
 {
     public static class Animator
     {
         public static Storyboard StoryBoard = new();
         private static TimeSpan duration = TimeSpan.FromMilliseconds(500);
+        //private static TimeSpan duration2 = TimeSpan.FromMilliseconds(1000);
 
         private static readonly IEasingFunction Smooth = new QuarticEase
         {
@@ -84,5 +85,30 @@ namespace VenkateshWPF.Class
 
             element.BeginAnimation(FrameworkElement.HeightProperty, animation);
         }
+
+
+
+        // This is old, replaced with new -- Saving it here tho just incase i run into problems.
+        /*
+        public static void WidthShift(Duration speed, Ellipse Circle, double OriginalSize, double NewSize)
+        {
+            DoubleAnimation doubleanimation = new DoubleAnimation();
+            doubleanimation.From = new double?(OriginalSize);
+            doubleanimation.To = new double?(NewSize);
+            doubleanimation.Duration = speed;
+            doubleanimation.EasingFunction = new QuarticEase();
+            Circle.BeginAnimation(FrameworkElement.WidthProperty, doubleanimation); ;
+        }
+
+        public static void HeightShift(Duration speed, Ellipse Circle, double OriginalSize, double NewSize)
+        {
+            DoubleAnimation doubleanimation = new DoubleAnimation();
+            doubleanimation.From = new double?(OriginalSize);
+            doubleanimation.To = new double?(NewSize);
+            doubleanimation.Duration = speed;
+            doubleanimation.EasingFunction = new QuarticEase();
+            Circle.BeginAnimation(FrameworkElement.HeightProperty, doubleanimation); ;
+        }
+        */
     }
 }

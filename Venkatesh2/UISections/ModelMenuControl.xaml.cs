@@ -170,7 +170,7 @@ namespace Venkatesh2.Controls
             {
                 try
                 {
-                    var path = Path.Combine(Directory.GetCurrentDirectory(), "bin", clickedButton.Tag.ToString()!);
+                    var path = Path.Combine(Directory.GetCurrentDirectory(), "bin", clickedButton.Tag.ToString());
                     if (Directory.Exists(path))
                     {
                         Process.Start("explorer.exe", path);

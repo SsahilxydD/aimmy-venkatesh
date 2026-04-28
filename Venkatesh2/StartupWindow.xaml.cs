@@ -63,7 +63,7 @@ namespace Venkatesh2
                 await Task.Delay(500);
                 await StartSmoothTransition();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 ShowMainWindowDirect();
             }
@@ -88,7 +88,7 @@ namespace Venkatesh2
                 UpdateDynamicResources(baseColor);
                 UpdateParticleColors(baseColor);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }
@@ -142,7 +142,7 @@ namespace Venkatesh2
             UpdateCentralGlow(baseColor);
 
             // Keep white shadow for logo
-            if (FindName("VenkateshLogo") is Path logo && logo.Effect is DropShadowEffect shadowEffect)
+            if (FindName("AimmyLogo") is Path logo && logo.Effect is DropShadowEffect shadowEffect)
                 shadowEffect.Color = Colors.White;
         }
 
@@ -358,8 +358,6 @@ namespace Venkatesh2
 
         private void SetupTransitionGeometry()
         {
-            if (_mainWindow == null) return;
-
             _mainWindow.Left = Left;
             _mainWindow.Top = Top;
             _mainWindow.Show();
@@ -447,7 +445,7 @@ namespace Venkatesh2
                 ContentContainer.CacheMode = null;
                 Close();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }
@@ -476,7 +474,7 @@ namespace Venkatesh2
                 }
                 Close();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 Application.Current.Shutdown();
             }

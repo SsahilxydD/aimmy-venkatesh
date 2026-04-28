@@ -11,13 +11,13 @@ namespace Venkatesh2.Other
         public GithubManager()
         {
             httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("User-Agent", "Venkatesh2");
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Aimmy2");
             httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
         }
 
         private class GitHubContent
         {
-            public string name { get; set; } = string.Empty;
+            public string name { get; set; }
         }
 
         public async Task<(string tagName, string downloadUrl)> GetLatestReleaseInfo(string owner, string repo)
@@ -28,8 +28,7 @@ namespace Venkatesh2.Other
             response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadAsStringAsync();
-            var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(content)
-                       ?? throw new InvalidOperationException("Release response was empty");
+            var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(content);
 
             string tagName = data["tag_name"].ToString() ?? throw new InvalidOperationException("Tag name is missing in the response");
             string downloadUrl = ((JsonElement)data["assets"]).EnumerateArray().First().GetProperty("browser_download_url").ToString();

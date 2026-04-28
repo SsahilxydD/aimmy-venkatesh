@@ -42,7 +42,7 @@ namespace Other
             ModelListBox.Drop += ModelListBox_DragDrop;
 
             ConfigListBox.AllowDrop = true;
-            ConfigListBox.DragOver += ConfigListBox_DragOver;
+            ConfigListBox.DragOver += ConfigListBox_DragDrop;
             ConfigListBox.Drop += ConfigListBox_DragDrop;
 
 
@@ -92,7 +92,7 @@ namespace Other
             Dictionary.lastLoadedModel = selectedModel;
 
             // Store original values and disable them temporarily
-            var toggleKeys = new[] { "Aim Assist", "Constant AI Tracking", "Show Detected Player", "Show AI Confidence", "Show Tracers" };
+            var toggleKeys = new[] { "Aim Assist", "Constant AI Tracking", "Auto Trigger", "Show Detected Player", "Show AI Confidence", "Show Tracers" };
             var originalToggleStates = toggleKeys.ToDictionary(key => key, key => Dictionary.toggleState[key]);
             foreach (var key in toggleKeys)
             {
@@ -212,7 +212,7 @@ namespace Other
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                string targetFolder = "bin/configs";
+                string targetFolder = "bin/models";
 
                 foreach (var file in files)
                 {
@@ -243,7 +243,7 @@ namespace Other
                     if (ModelListBox.Items.Count > 0)
                     {
                         string? lastLoadedModel = Dictionary.lastLoadedModel;
-                        if (lastLoadedModel != "N/A" && ModelListBox.Items.Contains(lastLoadedModel)) { ModelListBox.SelectedItem = lastLoadedModel; }
+                        if (lastLoadedModel != "N/A" && !ModelListBox.Items.Contains(lastLoadedModel)) { ModelListBox.SelectedItem = lastLoadedModel; }
                         SelectedModelNotifier.Content = $"Loaded Model: {lastLoadedModel}";
                     }
                 });
@@ -267,7 +267,7 @@ namespace Other
                     if (ConfigListBox.Items.Count > 0)
                     {
                         string? lastLoadedConfig = Dictionary.lastLoadedConfig;
-                        if (lastLoadedConfig != "N/A" && ConfigListBox.Items.Contains(lastLoadedConfig)) { ConfigListBox.SelectedItem = lastLoadedConfig; }
+                        if (lastLoadedConfig != "N/A" && !ConfigListBox.Items.Contains(lastLoadedConfig)) { ConfigListBox.SelectedItem = lastLoadedConfig; }
 
                         SelectedConfigNotifier.Content = "Loaded Config: " + lastLoadedConfig;
                     }

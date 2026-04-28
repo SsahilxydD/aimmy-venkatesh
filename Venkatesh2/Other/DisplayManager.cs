@@ -320,7 +320,7 @@ namespace Venkatesh2.Class
                     });
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
 
@@ -334,7 +334,7 @@ namespace Venkatesh2.Class
                     });
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }

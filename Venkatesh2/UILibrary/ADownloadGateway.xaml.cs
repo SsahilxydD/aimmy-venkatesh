@@ -45,7 +45,7 @@ namespace Venkatesh2.UILibrary
         {
             if (!httpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                httpClient.DefaultRequestHeaders.Add("User-Agent", "Venkatesh2");
+                httpClient.DefaultRequestHeaders.Add("User-Agent", "Aimmy2");
             }
             if (!httpClient.DefaultRequestHeaders.Contains("Accept"))
             {
@@ -66,7 +66,7 @@ namespace Venkatesh2.UILibrary
             var content = await response.Content.ReadAsByteArrayAsync();
             var filePath = Path.Combine("bin", path, name);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!); // just in case
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)); // just in case
             await File.WriteAllBytesAsync(filePath, content);
             return true;
         }

@@ -29,8 +29,9 @@ namespace Other
 
                 return current.CompareTo(latest);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+
                 // Fallback to string comparison if parsing fails
                 return string.Compare(currentVersion, latestVersion, StringComparison.OrdinalIgnoreCase);
             }
@@ -69,9 +70,9 @@ namespace Other
 
         private async Task DoUpdate(string latestZipUrl)
         {
-            // Download the newest release of Venkatesh to %temp%
+            // Download the newest release of Aimmy to %temp%
             string envTempPath = Path.GetTempPath();
-            string localZipPath = Path.Combine(envTempPath, "VenkateshUpdate.zip");
+            string localZipPath = Path.Combine(envTempPath, "AimmyUpdate.zip");
 
             var response = await client.GetAsync(new Uri(latestZipUrl), HttpCompletionOption.ResponseHeadersRead);
 
@@ -80,13 +81,13 @@ namespace Other
             await stream.CopyToAsync(fileStream);
 
             // Extract update to %temp%
-            string extractPath = Path.Combine(envTempPath, "VenkateshUpdate");
+            string extractPath = Path.Combine(envTempPath, "AimmyUpdate");
             await Task.Run(() => // Run extraction in a separate task
             {
                 ZipFile.ExtractToDirectory(localZipPath, extractPath, true);
             });
 
-            // Create a batch script to move the files and restart Venkatesh
+            // Create a batch script to move the files and restart Aimmy
             string? mainAppPath = Environment.ProcessPath;
 
             string? mainAppDir = Path.GetDirectoryName(mainAppPath) ?? throw new InvalidOperationException("Failed to get the directory name from the main module file path.");

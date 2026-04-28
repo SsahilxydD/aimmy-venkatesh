@@ -17,8 +17,8 @@ namespace Venkatesh2.Controls
     public partial class AimMenuControl : UserControl
     {
         //--
-        UISections.ColorPicker? colorPickerInstance = null;
-        UISections.ColorPicker? fovColorPickerInstance = null;
+        UISections.ColorPicker colorPickerInstance = null;
+        UISections.ColorPicker fovColorPickerInstance = null;
         //--
         private MainWindow? _mainWindow;
         private bool _isInitialized;
@@ -28,14 +28,18 @@ namespace Venkatesh2.Controls
         {
             { "Aim Assist", false },
             { "Aim Config", false },
+            { "Predictions", false },
+            { "Auto Trigger", false },
             { "FOV Config", false },
             { "ESP Config", false }
         };
 
         // Public properties for MainWindow access
         public StackPanel AimAssistPanel => AimAssist;
+        public StackPanel TriggerBotPanel => TriggerBot;
         public StackPanel ESPConfigPanel => ESPConfig;
         public StackPanel AimConfigPanel => AimConfig;
+        public StackPanel PredictionsPanel => Predictions;
         public StackPanel FOVConfigPanel => FOVConfig;
         public ScrollViewer AimMenuScrollViewer => AimMenu;
 
@@ -59,6 +63,8 @@ namespace Venkatesh2.Controls
             // Load all sections
             LoadAimAssist();
             LoadAimConfig();
+            LoadPredictions();
+            LoadTriggerBot();
             LoadFOVConfig();
             LoadESPConfig();
 
@@ -91,6 +97,8 @@ namespace Venkatesh2.Controls
         {
             ApplyPanelState("Aim Assist", AimAssistPanel);
             ApplyPanelState("Aim Config", AimConfigPanel);
+            ApplyPanelState("Predictions", PredictionsPanel);
+            ApplyPanelState("Auto Trigger", TriggerBotPanel);
             ApplyPanelState("FOV Config", FOVConfigPanel);
             ApplyPanelState("ESP Config", ESPConfigPanel);
         }
@@ -178,7 +186,7 @@ namespace Venkatesh2.Controls
                             else
                             {
                                 Dictionary.toggleState["Aim Assist"] = true;
-                                _mainWindow!.UpdateToggleUI(uiManager.T_AimAligner!, true);
+                                _mainWindow.UpdateToggleUI(uiManager.T_AimAligner, true);
                             }
                         }
                     };
@@ -228,19 +236,19 @@ namespace Venkatesh2.Controls
                     // Setup handlers
                     uiManager.DDI_LGHUB.Selected += async (s, e) =>
                     {
-                        if (!new _xB48E()._mLd06())
+                        if (!new LGHubMain().Load())
                             await ResetToMouseEvent();
                     };
 
                     uiManager.DDI_RazerSynapse.Selected += async (s, e) =>
                     {
-                        if (!await _xC59A._mLd07())
+                        if (!await RZMouse.Load())
                             await ResetToMouseEvent();
                     };
 
                     uiManager.DDI_ddxoft.Selected += async (s, e) =>
                     {
-                        if (!await _xE723._mLd0C())
+                        if (!await DdxoftMain.Load())
                             await ResetToMouseEvent();
                     };
                 }, tooltip: "How mouse movements are sent. Try different options if aim assist isn't working.")
@@ -295,12 +303,14 @@ namespace Venkatesh2.Controls
                         var value = s.Slider.Value;
                         if (value >= 0.98)
                             LogManager.Log(LogManager.LogLevel.Warning,
-                                "The Mouse Sensitivity you have set can cause Venkatesh to be unable to aim, please decrease if you suffer from this problem", true);
+                                "The Mouse Sensitivity you have set can cause Aimmy to be unable to aim, please decrease if you suffer from this problem", true);
                         else if (value <= 0.1)
                             LogManager.Log(LogManager.LogLevel.Warning,
-                                "The Mouse Sensitivity you have set can cause Venkatesh to be unstable to aim, please increase if you suffer from this problem", true);
+                                "The Mouse Sensitivity you have set can cause Aimmy to be unstable to aim, please increase if you suffer from this problem", true);
                     };
                 }, tooltip: "How fast the aim moves. Lower = faster and snappier, higher = slower and smoother.")
+                .AddSlider("Mouse Jitter", "Jitter", 1, 1, 0, 15, s => uiManager.S_MouseJitter = s,
+                    tooltip: "Adds random small movements to make aim look more human-like.")
                 .AddToggle("Y Axis Percentage Adjustment", t => uiManager.T_YAxisPercentageAdjustment = t,
                     tooltip: "Enable the Y Offset (%) slider to adjust aim vertically by percentage.")
                 .AddToggle("X Axis Percentage Adjustment", t => uiManager.T_XAxisPercentageAdjustment = t,
@@ -333,6 +343,91 @@ namespace Venkatesh2.Controls
                     s.Visibility = Dictionary.toggleState["X Axis Percentage Adjustment"]
                         ? Visibility.Visible : Visibility.Collapsed;
                 }, tooltip: "Move aim point left or right as a percentage of the target box width.");
+        }
+
+        private void LoadPredictions()
+        {
+            var uiManager = _mainWindow!.uiManager;
+            var builder = new SectionBuilder(this, Predictions);
+
+            builder
+                .AddTitle("Predictions", true, t =>
+                {
+                    uiManager.AT_Predictions = t;
+                    t.Minimize.Click += (s, e) =>
+                    {
+                        TogglePanel("Predictions", PredictionsPanel);
+                        _mainWindow?.UpdatePredictionSliderVisibility();
+                    };
+                })
+                .AddToggle("Predictions", t => uiManager.T_Predictions = t,
+                    tooltip: "Predict where a moving target will be. Helps track fast-moving targets.")
+                .AddDropdown("Prediction Method", d =>
+                {
+                    d.DropdownBox.SelectedIndex = -1;
+                    uiManager.D_PredictionMethod = d;
+                    _mainWindow.AddDropdownItem(d, "Kalman Filter");
+                    _mainWindow.AddDropdownItem(d, "Shall0e's Prediction");
+                    _mainWindow.AddDropdownItem(d, "wisethef0x's EMA Prediction");
+
+                    // Update slider visibility when prediction method changes
+                    d.DropdownBox.SelectionChanged += (s, e) => _mainWindow?.UpdatePredictionSliderVisibility();
+                }, tooltip: "The algorithm used to predict target movement. Try different ones to see what works best.")
+                .AddSlider("Kalman Lead Time", "Seconds", 0.01, 0.01, 0.02, 0.30, s =>
+                {
+                    uiManager.S_KalmanLeadTime = s;
+                    // Start collapsed - visibility will be set by LoadDropdownStates
+                    s.Visibility = Visibility.Collapsed;
+                }, tooltip: "How far ahead to predict target position. Higher = more prediction, may overshoot.")
+                .AddSlider("WiseTheFox Lead Time", "Seconds", 0.01, 0.01, 0.02, 0.30, s =>
+                {
+                    uiManager.S_WiseTheFoxLeadTime = s;
+                    // Start collapsed - visibility will be set by LoadDropdownStates
+                    s.Visibility = Visibility.Collapsed;
+                }, tooltip: "How far ahead to predict target position. Higher = more prediction, may overshoot.")
+                .AddSlider("Shalloe Lead Multiplier", "Frames", 0.5, 0.5, 1, 10, s =>
+                {
+                    uiManager.S_ShalloeLeadMultiplier = s;
+                    // Start collapsed - visibility will be set by LoadDropdownStates
+                    s.Visibility = Visibility.Collapsed;
+                }, tooltip: "How many frames ahead to predict. Higher = more prediction, may overshoot.")
+                .AddToggle("EMA Smoothening", t => uiManager.T_EMASmoothing = t,
+                    tooltip: "Smooth out aim movements to reduce jitter and make tracking steadier.")
+                .AddSlider("EMA Smoothening", "Amount", 0.01, 0.01, 0.01, 1, s =>
+                {
+                    uiManager.S_EMASmoothing = s;
+                    s.Slider.ValueChanged += (sender, e) =>
+                    {
+                        if (Dictionary.toggleState["EMA Smoothening"])
+                        {
+                            MouseManager.smoothingFactor = s.Slider.Value;
+                        }
+                    };
+                }, tooltip: "How much smoothing to apply. Lower = smoother but slower, higher = faster but jittery.")
+                .AddSeparator();
+        }
+
+        private void LoadTriggerBot()
+        {
+            var uiManager = _mainWindow!.uiManager;
+            var builder = new SectionBuilder(this, TriggerBot);
+
+            builder
+                .AddTitle("Auto Trigger", true, t =>
+                {
+                    uiManager.AT_TriggerBot = t;
+                    t.Minimize.Click += (s, e) => TogglePanel("Auto Trigger", TriggerBotPanel);
+                })
+                .AddToggle("Auto Trigger", t => uiManager.T_AutoTrigger = t,
+                    tooltip: "Automatically click when a target is detected in your crosshair area.")
+                .AddToggle("Cursor Check", t => uiManager.T_CursorCheck = t,
+                    tooltip: "Only trigger when cursor is directly on target. More accurate but may miss some shots.")
+                .AddToggle("Spray Mode", t => uiManager.T_SprayMode = t,
+                    tooltip: "Hold down fire instead of single clicks. Good for automatic weapons.")
+                //.AddToggle("Only When Held", t => uiManager.T_OnlyWhenHeld = t)
+                .AddSlider("Auto Trigger Delay", "Seconds", 0.01, 0.1, 0.01, 1, s => uiManager.S_AutoTriggerDelay = s,
+                    tooltip: "Wait time before firing after detecting a target. Helps avoid accidental shots.")
+                .AddSeparator();
         }
 
         private void LoadFOVConfig()
@@ -457,7 +552,7 @@ namespace Venkatesh2.Controls
                     if (Dictionary.toggleState["Show Detected Player"])
                     {
                         // simulate a click to turn it off - this is to force a reload of the ui cause tracer doesn't update otherwise - helz
-                        uiManager.T_ShowDetectedPlayer!.Reader.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                        uiManager.T_ShowDetectedPlayer.Reader.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                         // simulate a click to turn it back on - same as before ^ - helz
                         uiManager.T_ShowDetectedPlayer.Reader.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     }

@@ -1,4 +1,4 @@
-using AILogic;
+﻿using AILogic;
 using Venkatesh2.Class;
 using Class;
 using InputLogic;
@@ -22,162 +22,202 @@ namespace Venkatesh2.AILogic
     {
         #region Variables
 
-        private int _fI01;
-        private readonly object _fL02 = new object();
-        private volatile bool _fG02 = false;
+        private int _currentImageSize;
+        private readonly object _sizeLock = new object();
+        private volatile bool _sizeChangePending = false;
 
         public void RequestSizeChange(int newSize)
         {
-            lock (_fL02)
+            lock (_sizeLock)
             {
-                _fG02 = true;
+                _sizeChangePending = true;
             }
         }
 
-        public int IMAGE_SIZE => _fI01;
-        private int _fND03 { get; set; } = 8400;
-        private bool _fDM04 { get; set; } = false;
+        // Dynamic properties instead of constants
+        public int IMAGE_SIZE => _currentImageSize;
+        private int NUM_DETECTIONS { get; set; } = 8400; // Will be set dynamically for dynamic models
+        private bool IsDynamicModel { get; set; } = false;
 
+        // Public static property to check if current loaded model is dynamic
         public static bool CurrentModelIsDynamic { get; private set; } = false;
-        private int _fNC05 { get; set; } = 1;
-        private Dictionary<int, string> _fC03 = new Dictionary<int, string>
+        private int ModelFixedSize { get; set; } = 640; // Store the fixed size for non-dynamic models
+        private int NUM_CLASSES { get; set; } = 1;
+        private Dictionary<int, string> _modelClasses = new Dictionary<int, string>
         {
-            { 0, _xB9D2._c33 }
+            { 0, "enemy" }
         };
-        public Dictionary<int, string> ModelClasses => _fC03;
+        public Dictionary<int, string> ModelClasses => _modelClasses; // apparently this is better than making _modelClasses public
         public static event Action<Dictionary<int, string>>? ClassesUpdated;
         public static event Action<int>? ImageSizeUpdated;
         public static event Action<bool>? DynamicModelStatusChanged;
 
-        private const int _fK18 = 500;
+        private const int SAVE_FRAME_COOLDOWN_MS = 500;
 
-        private long _fS04 = 0;
-        private List<string>? _fN06;
-        private RectangleF _fD05x;
+        private DateTime lastSavedTime = DateTime.MinValue;
+        private List<string>? _outputNames;
+        private RectangleF LastDetectionBox;
+        private KalmanPrediction kalmanPrediction;
+        private WiseTheFoxPrediction wtfpredictionManager;
 
+        private byte[]? _bitmapBuffer; // Reusable buffer for bitmap operations
+
+        // Display-aware properties
         private int ScreenWidth => DisplayManager.ScreenWidth;
         private int ScreenHeight => DisplayManager.ScreenHeight;
         private int ScreenLeft => DisplayManager.ScreenLeft;
         private int ScreenTop => DisplayManager.ScreenTop;
 
-        private readonly RunOptions? _fO0D;
-        private InferenceSession? _fX0C;
+        private readonly RunOptions? _modeloptions;
+        private InferenceSession? _onnxModel;
 
-        private CancellationTokenSource? _fC0F;
-        private Task? _fT10;
+        private Thread? _aiLoopThread;
+        private volatile bool _isAiLoopRunning;
 
-        private RectangleF _fR05;
-        private bool _fH06;
+        // For Auto-Labelling Data System
+        private bool PlayerFound = false;
 
-        private Prediction? _fT07 = null;
-        private int _fW08 = 0;
-        private int _fA0E = 0;
+        // Sticky-Aim
+        private Prediction? _currentTarget = null;
+        private int _consecutiveFramesWithoutTarget = 0;
+        private const int MAX_FRAMES_WITHOUT_TARGET = 3; // Allow 3 frames of target loss
 
-        private float _fVX09 = 0f;
-        private float _fVY0A = 0f;
-        private float _fAX0B = 0f;
-        private float _fAY0C = 0f;
-        private const float _fR19 = 10000f;
+        // Enhanced Sticky Aim State
+        private float _lastTargetVelocityX = 0f;
+        private float _lastTargetVelocityY = 0f;
+        private float _targetLockScore = 0f;           // Accumulated "stickiness" score
+        private const float LOCK_SCORE_DECAY = 0.85f;  // Decay per frame when target not matched
+        private const float LOCK_SCORE_GAIN = 15f;     // Gain per frame when target matched
+        private const float MAX_LOCK_SCORE = 100f;     // Maximum accumulated score
+        private const float REFERENCE_TARGET_SIZE = 10000f; // Reference area for "close" targets (approx 100x100)
+        private int _framesWithoutMatch = 0;           // Consecutive frames where current target wasn't found
 
-        private int _fDX { get; set; }
-        private int _fDY { get; set; }
+        private double CenterXTranslated = 0;
+        private double CenterYTranslated = 0;
+
+        // Benchmarking
+        private int iterationCount = 0;
+        private long totalTime = 0;
+
+        private int detectedX { get; set; }
+        private int detectedY { get; set; }
 
         public double AIConf = 0;
-        private static int _fTX, _fTY;
+        private static int targetX, targetY;
 
+        // Pre-calculated values - now dynamic
         private float _scaleX => ScreenWidth / (float)IMAGE_SIZE;
         private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
 
-        private DenseTensor<float>? _fR13;
-        private float[]? _fR14;
-        private List<NamedOnnxValue>? _fR15;
+        // Tensor reuse (model inference)
+        private DenseTensor<float>? _reusableTensor;
+        private float[]? _reusableInputArray;
+        private List<NamedOnnxValue>? _reusableInputs;
 
-        private readonly List<Prediction> _fK16 = new(32);
+        // Benchmarking
+        private readonly Dictionary<string, BenchmarkData> _benchmarks = new();
+        private readonly object _benchmarkLock = new();
 
-        private readonly Prediction _fG17 = new();
 
-        private bool _fA23;
-        private bool _fA24;
-        private bool _fA25;
-        private bool _fA26;
-        private bool _fA27;
-        private bool _fA28;
-        private bool _fA29;
-        private bool _fA2A;
-        private bool _fA2B;
-        private float _fA2C;
-        private float _fA2D;
-        private double _fA2E;
-        private double _fA2F;
-        private double _fA30;
-        private double _fA31;
-        private double _fA32;
-        private string _fA33 = _xB9D2._c17;
-        private System.Drawing.Point _fA34;
+        private readonly CaptureManager _captureManager = new();
+        #endregion Variables
 
-        private string _fT35 = "";
-        private int _fT36 = -1;
+        #region Benchmarking
 
-        private void _mR01()
+        private class BenchmarkData
         {
-            uint _jv = unchecked((uint)(Environment.TickCount ^ 0xA5F3)) & 0u; _ = _jv;
-            _fA23           = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c01]);
-            _fA24  = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c02]);
-            _fA25  = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c03]);
-            _fA26           = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c04]);
-            _fA27            = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c05]);
-            _fA28            = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c06]);
-            _fA29         = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c07]);
-            _fA2A          = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c08]);
-            _fA2C             = Convert.ToSingle(Dictionary.sliderSettings[_xB9D2._c09]);
-            _fA2D       = Convert.ToSingle(Dictionary.sliderSettings[_xB9D2._c0A]) / 100.0f;
-            _fA2E             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0B]);
-            _fA2F             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0C]);
-            _fA30          = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0D]);
-            _fA31          = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0E]);
-            _fA32     = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0F]);
-            _fA33     = Convert.ToString(Dictionary.dropdownState[_xB9D2._c10]) ?? _xB9D2._c17;
-            _fA2B      = Convert.ToString(Dictionary.dropdownState[_xB9D2._c11]) == _xB9D2._c12;
+            public long TotalTime { get; set; }
+            public int CallCount { get; set; }
+            public long MinTime { get; set; } = long.MaxValue;
+            public long MaxTime { get; set; }
+            public double AverageTime => CallCount > 0 ? (double)TotalTime / CallCount : 0;
+        }
 
-            _fA34 = WinAPICaller.GetCursorPosition();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private IDisposable Benchmark(string name)
+        {
+            return new BenchmarkScope(this, name);
+        }
 
-            string tc = Convert.ToString(Dictionary.dropdownState[_xB9D2._c13]) ?? _xB9D2._c14;
-            if (tc != _fT35)
+        private class BenchmarkScope : IDisposable
+        {
+            private readonly AIManager _manager;
+            private readonly string _name;
+            private readonly Stopwatch _sw;
+
+            public BenchmarkScope(AIManager manager, string name)
             {
-                _fT35 = tc;
-                _fT36  = tc == _xB9D2._c14 ? -1
-                    : _fC03.FirstOrDefault(c => c.Value == tc).Key;
+                _manager = manager;
+                _name = name;
+                _sw = Stopwatch.StartNew();
+            }
+
+            public void Dispose()
+            {
+                _sw.Stop();
+                _manager.RecordBenchmark(_name, _sw.ElapsedMilliseconds);
             }
         }
 
-        private readonly CaptureManager _fP3B = new();
-        #endregion Variables
-
-        private static bool _opP()
+        private void RecordBenchmark(string name, long elapsedMs)
         {
-            int _t = Environment.TickCount;
-            return (_t | (~_t)) == -1;
+            lock (_benchmarkLock)
+            {
+                if (!_benchmarks.TryGetValue(name, out var data))
+                {
+                    data = new BenchmarkData();
+                    _benchmarks[name] = data;
+                }
+
+                data.TotalTime += elapsedMs;
+                data.CallCount++;
+                data.MinTime = Math.Min(data.MinTime, elapsedMs);
+                data.MaxTime = Math.Max(data.MaxTime, elapsedMs);
+            }
         }
+
+        public void PrintBenchmarks()
+        {
+            lock (_benchmarkLock)
+            {
+                var lines = new List<string>
+                {
+                    "=== AIManager Performance Benchmarks ==="
+                };
+
+                foreach (var kvp in _benchmarks.OrderBy(x => x.Key))
+                {
+                    var data = kvp.Value;
+                    lines.Add($"{kvp.Key}: Avg={data.AverageTime:F2}ms, Min={data.MinTime}ms, Max={data.MaxTime}ms, Count={data.CallCount}");
+                }
+
+                lines.Add($"Overall FPS: {(iterationCount > 0 ? 1000.0 / (totalTime / (double)iterationCount) : 0):F2}");
+
+                //File.WriteAllLines("AIManager_Benchmarks.txt", lines);
+
+                Log(LogLevel.Info, string.Join(Environment.NewLine, lines));
+            }
+        }
+
+        #endregion Benchmarking
 
         public AIManager(string modelPath)
         {
-            _fI01 = int.Parse(Dictionary.dropdownState[_xB9D2._c19]);
+            // Initialize the cached image size
+            _currentImageSize = int.Parse(Dictionary.dropdownState["Image Size"]);
 
-            if (Dictionary.dropdownState[_xB9D2._c1A] == _xB9D2._c2C)
+            // Initialize DXGI capture for current display
+            if (Dictionary.dropdownState["Screen Capture Method"] == "DirectX")
             {
-                _fP3B._mI03();
+                _captureManager.InitializeDxgiDuplication();
             }
 
-            _fO0D = new RunOptions();
+            kalmanPrediction = new KalmanPrediction();
+            wtfpredictionManager = new WiseTheFoxPrediction();
 
-            Task.Run(() => _mI05(modelPath));
-        }
+            _modeloptions = new RunOptions();
 
-        #region Models
-
-        private static SessionOptions _mB03()
-        {
-            return new SessionOptions
+            var sessionOptions = new SessionOptions
             {
                 EnableCpuMemArena = true,
                 EnableMemoryPattern = false,
@@ -186,106 +226,83 @@ namespace Venkatesh2.AILogic
                 InterOpNumThreads = 1,
                 IntraOpNumThreads = 4
             };
+
+            // Attempt to load via DirectML (else fallback to CPU)
+            Task.Run(() => InitializeModel(sessionOptions, modelPath));
         }
 
-        private static string _mF06(string modelPath)
+        #region Models
+
+        private async Task InitializeModel(SessionOptions sessionOptions, string modelPath)
         {
-            string dir  = Path.GetDirectoryName(modelPath) ?? "";
-            string stem = Path.GetFileNameWithoutExtension(modelPath);
-            string fp16 = Path.Combine(dir, stem + "_fp16.onnx");
-            return File.Exists(fp16) ? fp16 : modelPath;
-        }
-
-        private async Task _mI05(string modelPath)
-        {
-            string originalPath = modelPath;
-            string resolved = _mF06(modelPath);
-            bool usingFp16 = !string.Equals(resolved, originalPath, StringComparison.OrdinalIgnoreCase);
-
-            if (usingFp16)
-                Log(LogLevel.Info, $"FP16 model found — using {Path.GetFileName(resolved)} for faster inference.");
-
-            if (await _mT06(resolved, useDirectML: true))
-            { FileManager.CurrentlyLoadingModel = false; return; }
-
-            if (await _mT06(resolved, useDirectML: false))
-            { FileManager.CurrentlyLoadingModel = false; return; }
-
-            if (usingFp16)
+            using (Benchmark("ModelInitialization"))
             {
-                Log(LogLevel.Warning, "FP16 model failed on all providers — retrying with original FP32 model.", true);
-                if (await _mT06(originalPath, useDirectML: true))
-                { FileManager.CurrentlyLoadingModel = false; return; }
+                try
+                {
+                    await LoadModelAsync(sessionOptions, modelPath, useDirectML: true);
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Error, $"Error starting the model via DirectML: {ex.Message}\n\nFalling back to CPU, performance may be poor.", true);
 
-                if (await _mT06(originalPath, useDirectML: false))
-                { FileManager.CurrentlyLoadingModel = false; return; }
+                    try
+                    {
+                        await LoadModelAsync(sessionOptions, modelPath, useDirectML: false);
+                    }
+                    catch (Exception e)
+                    {
+                        Log(LogLevel.Error, $"Error starting the model via CPU: {e.Message}, you won't be able to aim assist at all.", true);
+                    }
+                }
+
+                FileManager.CurrentlyLoadingModel = false;
             }
-
-            Log(LogLevel.Error, "All model loading attempts failed. Aim assist will not work.", true);
-            FileManager.CurrentlyLoadingModel = false;
         }
 
-        private async Task<bool> _mT06(string modelPath, bool useDirectML)
+        private Task LoadModelAsync(SessionOptions sessionOptions, string modelPath, bool useDirectML)
         {
             try
             {
-                await _mL07(_mB03(), modelPath, useDirectML);
-                return _fT10 != null;
-            }
-            catch (Exception ex)
-            {
-                string ep = useDirectML ? "DirectML" : "CPU";
-                Log(LogLevel.Error, $"Model load via {ep} failed: {ex.Message}");
-                return false;
-            }
-        }
+                if (useDirectML) { sessionOptions.AppendExecutionProvider_DML(); }
+                else { sessionOptions.AppendExecutionProvider_CPU(); }
 
-        private static void _mD04(SessionOptions sessionOptions)
-        {
-            sessionOptions.AppendExecutionProvider_DML(0);
-        }
+                _onnxModel = new InferenceSession(modelPath, sessionOptions);
+                _outputNames = new List<string>(_onnxModel.OutputMetadata.Keys);
 
-        private Task _mL07(SessionOptions sessionOptions, string modelPath, bool useDirectML)
-        {
-            try
-            {
-                if (useDirectML)
+                // Validate the onnx model output shape (ensure model is OnnxV8)
+                if (!ValidateOnnxShape())
                 {
-                    _mD04(sessionOptions);
-                }
-                else
-                {
-                    sessionOptions.AppendExecutionProvider_CPU();
-                }
-
-                _fX0C = new InferenceSession(modelPath, sessionOptions);
-                _fN06 = new List<string>(_fX0C.OutputMetadata.Keys);
-
-                if (!_mV08())
-                {
-                    _fX0C?.Dispose();
+                    _onnxModel?.Dispose();
                     return Task.CompletedTask;
                 }
 
+                // Pre-allocate bitmap buffer
+                _bitmapBuffer = new byte[3 * IMAGE_SIZE * IMAGE_SIZE];
             }
             catch (Exception ex)
             {
                 Log(LogLevel.Error, $"Error loading the model: {ex.Message}", true);
-                _fX0C?.Dispose();
+                _onnxModel?.Dispose();
                 return Task.CompletedTask;
             }
 
-            _fC0F = new CancellationTokenSource();
-            _fT10 = Task.Run(() => _mL0C(_fC0F.Token));
+            // Begin the loop
+            _isAiLoopRunning = true;
+            _aiLoopThread = new Thread(AiLoop)
+            {
+                IsBackground = true,
+                Priority = ThreadPriority.AboveNormal // Higher priority for AI thread
+            };
+            _aiLoopThread.Start();
             return Task.CompletedTask;
         }
 
-        private bool _mV08()
+        private bool ValidateOnnxShape()
         {
-            if (_fX0C != null)
+            if (_onnxModel != null)
             {
-                var inputMetadata = _fX0C.InputMetadata;
-                var outputMetadata = _fX0C.OutputMetadata;
+                var inputMetadata = _onnxModel.InputMetadata;
+                var outputMetadata = _onnxModel.OutputMetadata;
 
                 Log(LogLevel.Info, "=== Model Metadata ===");
                 Log(LogLevel.Info, "Input Metadata:");
@@ -298,13 +315,15 @@ namespace Venkatesh2.AILogic
                     string dimensionsStr = string.Join("x", kvp.Value.Dimensions);
                     Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
 
+                    // Check if model is dynamic (dimensions are -1)
                     if (kvp.Value.Dimensions.Any(d => d == -1))
                     {
                         isDynamic = true;
                     }
                     else if (kvp.Value.Dimensions.Length == 4)
                     {
-                        fixedInputSize = kvp.Value.Dimensions[2];
+                        // For fixed models, check if it's the expected format (1x3xHxW)
+                        fixedInputSize = kvp.Value.Dimensions[2]; // Height should equal Width for square models
                     }
                 }
 
@@ -315,18 +334,23 @@ namespace Venkatesh2.AILogic
                     Log(LogLevel.Info, $"  Name: {kvp.Key}, Dimensions: {dimensionsStr}");
                 }
 
-                _fDM04 = isDynamic;
+                IsDynamicModel = isDynamic;
                 CurrentModelIsDynamic = isDynamic;
 
-                if (_fDM04)
+                if (IsDynamicModel)
                 {
-                    _fND03 = _mN05(IMAGE_SIZE);
-                    _mC08x();
+                    // For dynamic models, calculate NUM_DETECTIONS based on selected image size
+                    NUM_DETECTIONS = CalculateNumDetections(IMAGE_SIZE);
+                    LoadClasses();
                     ImageSizeUpdated?.Invoke(IMAGE_SIZE);
-                    Log(LogLevel.Info, $"Loaded dynamic model - using selected image size {IMAGE_SIZE}x{IMAGE_SIZE} with {_fND03} detections", true, 3000);
+                    Log(LogLevel.Info, $"Loaded dynamic model - using selected image size {IMAGE_SIZE}x{IMAGE_SIZE} with {NUM_DETECTIONS} detections", true, 3000);
                 }
                 else
                 {
+                    // For fixed models, auto-adjust image size if needed
+                    ModelFixedSize = fixedInputSize;
+
+                    // List of supported sizes
                     var supportedSizes = new[] { "640", "512", "416", "320", "256", "160" };
                     var fixedSizeStr = fixedInputSize.ToString();
 
@@ -338,21 +362,25 @@ namespace Venkatesh2.AILogic
                         return false;
                     }
 
-                    _fND03 = _mN05(fixedInputSize);
-                    _fI01 = fixedInputSize;
+                    // Always calculate NUM_DETECTIONS based on the model's fixed size
+                    NUM_DETECTIONS = CalculateNumDetections(fixedInputSize);
+                    _currentImageSize = fixedInputSize;
 
-                    if (fixedInputSize != int.Parse(Dictionary.dropdownState[_xB9D2._c19]))
+                    if (fixedInputSize != int.Parse(Dictionary.dropdownState["Image Size"]))
                     {
+                        // Auto-adjust the image size to match the model
                         Log(LogLevel.Warning,
                             $"Fixed-size model expects {fixedInputSize}x{fixedInputSize}. Automatically adjusting Image Size setting.",
                             true, 3000);
 
-                        Dictionary.dropdownState[_xB9D2._c19] = fixedSizeStr;
+                        Dictionary.dropdownState["Image Size"] = fixedSizeStr;
 
+                        // Update the UI dropdown if it exists
                         Application.Current?.Dispatcher.BeginInvoke(() =>
                         {
                             try
                             {
+                                // Find the MainWindow and update the dropdown
                                 var mainWindow = Application.Current.Windows.OfType<MainWindow>().FirstOrDefault();
                                 if (mainWindow?.SettingsMenuControlInstance != null)
                                 {
@@ -364,13 +392,14 @@ namespace Venkatesh2.AILogic
                     }
 
                     ImageSizeUpdated?.Invoke(fixedInputSize);
-                    _mC08x();
+                    LoadClasses();
 
-                    var expectedShape = new int[] { 1, 4 + _fNC05, _fND03 };
+                    // For static models, validate the expected shape
+                    var expectedShape = new int[] { 1, 4 + NUM_CLASSES, NUM_DETECTIONS };
                     if (!outputMetadata.Values.All(metadata => metadata.Dimensions.SequenceEqual(expectedShape)))
                     {
                         Log(LogLevel.Error,
-                            $"Output shape does not match the expected shape of {string.Join("x", expectedShape)}.\nThis model will not work with Venkatesh, please use an YOLOv8 model converted to ONNXv8.",
+                            $"Output shape does not match the expected shape of {string.Join("x", expectedShape)}.\nThis model will not work with Aimmy, please use an YOLOv8 model converted to ONNXv8.",
                             true, 10000);
                         return false;
                     }
@@ -378,7 +407,8 @@ namespace Venkatesh2.AILogic
                     Log(LogLevel.Info, $"Loaded fixed-size model: {fixedInputSize}x{fixedInputSize}", true, 2000);
                 }
 
-                DynamicModelStatusChanged?.Invoke(_fDM04);
+                // Notify UI about dynamic model status
+                DynamicModelStatusChanged?.Invoke(IsDynamicModel);
 
                 return true;
             }
@@ -386,14 +416,14 @@ namespace Venkatesh2.AILogic
             return false;
         }
 
-        private void _mC08x()
+        private void LoadClasses()
         {
-            if (_fX0C == null) return;
-            _fC03.Clear();
+            if (_onnxModel == null) return;
+            _modelClasses.Clear();
 
             try
             {
-                var metadata = _fX0C.ModelMetadata;
+                var metadata = _onnxModel.ModelMetadata;
 
                 if (metadata != null &&
                     metadata.CustomMetadataMap.TryGetValue("names", out string? value) &&
@@ -402,15 +432,16 @@ namespace Venkatesh2.AILogic
                     JObject data = JObject.Parse(value);
                     if (data != null && data.Type == JTokenType.Object)
                     {
+                        //int maxClassId = -1;
                         foreach (var item in data)
                         {
-                            if (int.TryParse(item.Key, out int classId) && item.Value?.Type == JTokenType.String)
+                            if (int.TryParse(item.Key, out int classId) && item.Value.Type == JTokenType.String)
                             {
-                                _fC03[classId] = item.Value.ToString();
+                                _modelClasses[classId] = item.Value.ToString();
                             }
                         }
-                        _fNC05 = _fC03.Count > 0 ? _fC03.Keys.Max() + 1 : 1;
-                        Log(LogLevel.Info, $"Loaded {_fC03.Count} class(es) from model metadata: {data.ToString(Newtonsoft.Json.Formatting.None)}", false);
+                        NUM_CLASSES = _modelClasses.Count > 0 ? _modelClasses.Keys.Max() + 1 : 1;
+                        Log(LogLevel.Info, $"Loaded {_modelClasses.Count} class(es) from model metadata: {data.ToString(Newtonsoft.Json.Formatting.None)}", false);
                     }
                     else
                     {
@@ -421,7 +452,7 @@ namespace Venkatesh2.AILogic
                 {
                     Log(LogLevel.Error, "Model metadata does not contain 'names' field for classes.", true);
                 }
-                ClassesUpdated?.Invoke(new Dictionary<int, string>(_fC03));
+                ClassesUpdated?.Invoke(new Dictionary<int, string>(_modelClasses));
             }
             catch (Exception ex)
             {
@@ -434,141 +465,221 @@ namespace Venkatesh2.AILogic
         #region AI
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool _mP09() =>
-            _fA24 ||
-            _fA25 ||
-            InputBindingManager.IsHoldingBinding(_xB9D2._c15) ||
-            InputBindingManager.IsHoldingBinding(_xB9D2._c16);
+        private static bool ShouldPredict() =>
+            Dictionary.toggleState["Show Detected Player"] ||
+            Dictionary.toggleState["Constant AI Tracking"] ||
+            InputBindingManager.IsHoldingBinding("Aim Keybind") ||
+            InputBindingManager.IsHoldingBinding("Second Aim Keybind");
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool _mS0A() =>
-            _fA23 ||
-            _fA24;
+        private static bool ShouldProcess() =>
+            Dictionary.toggleState["Aim Assist"] ||
+            Dictionary.toggleState["Show Detected Player"] ||
+            Dictionary.toggleState["Auto Trigger"];
 
-        private const double TARGET_FRAME_MS = 1000.0 / 144.0;
-        private const int IDLE_DELAY_MS = 33;
-
-        private async Task _mL0C(CancellationToken ct)
+        private async void AiLoop()
         {
-            bool _op = _opP();
-            uint _jv = unchecked((uint)(ct.GetHashCode() ^ 0xDEAD)) & 0u; _ = _jv;
-            Stopwatch frameTimer = new();
+            Stopwatch stopwatch = new();
+            DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
 
-            while (!ct.IsCancellationRequested)
+            while (_isAiLoopRunning)
             {
-                try
+                // Check for pending size changes at the start of each iteration
+                lock (_sizeLock)
                 {
-                    lock (_fL02)
+                    if (_sizeChangePending)
                     {
-                        if (_fG02)
+                        // Skip this iteration to allow clean shutdown
+                        continue;
+                    }
+                }
+
+                stopwatch.Restart();
+
+                // Handle any pending display changes
+                _captureManager.HandlePendingDisplayChanges();
+
+                using (Benchmark("AILoopIteration"))
+                {
+                    UpdateFOV();
+
+                    if (ShouldProcess())
+                    {
+                        if (ShouldPredict())
                         {
-                            Task.Delay(5, ct).Wait(ct);
-                            continue;
+                            Prediction? closestPrediction;
+                            using (Benchmark("GetClosestPrediction"))
+                            {
+                                closestPrediction = await GetClosestPrediction();
+                            }
+
+                            if (closestPrediction == null)
+                            {
+                                DisableOverlay(DetectedPlayerOverlay!);
+                                continue;
+                            }
+
+                            using (Benchmark("AutoTrigger"))
+                            {
+                                await AutoTrigger();
+                            }
+
+                            using (Benchmark("CalculateCoordinates"))
+                            {
+                                CalculateCoordinates(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
+                            }
+
+                            using (Benchmark("HandleAim"))
+                            {
+                                HandleAim(closestPrediction);
+                            }
+
+                            totalTime += stopwatch.ElapsedMilliseconds;
+                            iterationCount++;
                         }
-                    }
-
-                    frameTimer.Restart();
-                    _mR01();
-                    _fP3B._mH02();
-                    _mF0B();
-
-                    if (!_mS0A())
-                    {
-                        await Task.Delay(IDLE_DELAY_MS, ct);
-                        continue;
-                    }
-
-                    if (!_mP09())
-                    {
-                        await Task.Delay(IDLE_DELAY_MS, ct);
-                        continue;
-                    }
-
-                    Prediction? closestPrediction = _mG0B();
-                    DetectedPlayerWindow? DetectedPlayerOverlay = Dictionary.DetectedPlayerOverlay;
-
-                    if (closestPrediction == null)
-                    {
-                        _mD07(DetectedPlayerOverlay);
+                        else
+                        {
+                            // Processing so we are at the ready but not holding right/click.
+                            await Task.Delay(1);
+                        }
                     }
                     else
                     {
-                        _mC09(DetectedPlayerOverlay, closestPrediction, _scaleX, _scaleY);
-                        _mH0A2(closestPrediction);
+                        // No work to do—sleep briefly to free up CPU
+                        await Task.Delay(1);
                     }
+                }
 
-                    double elapsed = frameTimer.Elapsed.TotalMilliseconds;
-                    int remaining = (int)(TARGET_FRAME_MS - elapsed);
-                    if (remaining > 0)
-                        await Task.Delay(remaining, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Log(LogLevel.Error, $"_mL0C frame error: {ex.GetType().Name}: {ex.Message}");
-                    try { await Task.Delay(IDLE_DELAY_MS, ct); } catch { break; }
-                }
+                stopwatch.Stop();
             }
         }
 
         #region AI Loop Functions
 
-        private void _mF0B()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private async Task AutoTrigger()
         {
-            if (!_fA2B || !_fA2A) return;
-            if (Dictionary.FOVWindow == null) return;
-
-            var mousePosition = _fA34;
-            if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePosition.X, mousePosition.Y)))
+            // if auto trigger is disabled,
+            // or if the aim keybinds are not held,
+            // or if constant AI tracking is enabled,
+            // we check for spray release and return
+            if (!Dictionary.toggleState["Auto Trigger"] ||
+                !(InputBindingManager.IsHoldingBinding("Aim Keybind") && !InputBindingManager.IsHoldingBinding("Second Aim Keybind")) ||
+                Dictionary.toggleState["Constant AI Tracking"]) // this logic is a bit weird, but it works.
+                                                                // but it might need to be revised
+            {
+                CheckSprayRelease();
                 return;
+            }
 
-            var displayRelativeX = mousePosition.X - DisplayManager.ScreenLeft;
-            var displayRelativeY = mousePosition.Y - DisplayManager.ScreenTop;
 
-            Application.Current.Dispatcher.BeginInvoke(() =>
+            if (Dictionary.toggleState["Spray Mode"])
             {
-                if (Dictionary.FOVWindow == null) return;
-                Dictionary.FOVWindow.FOVStrictEnclosure.Margin = new Thickness(
-                    Convert.ToInt16(displayRelativeX / WinAPICaller.scalingFactorX) - 320,
-                    Convert.ToInt16(displayRelativeY / WinAPICaller.scalingFactorY) - 320, 0, 0);
-            });
-        }
+                await MouseManager.DoTriggerClick(LastDetectionBox);
+                return;
+            }
 
-        private static void _mD07(DetectedPlayerWindow? DetectedPlayerOverlay)
+
+            if (Dictionary.toggleState["Cursor Check"])
+            {
+                var mousePos = WinAPICaller.GetCursorPosition();
+
+                if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
+                {
+                    return;
+                }
+
+                if (LastDetectionBox.Contains(mousePos.X, mousePos.Y))
+                {
+                    await MouseManager.DoTriggerClick(LastDetectionBox);
+                }
+            }
+            else
+            {
+                await MouseManager.DoTriggerClick();
+            }
+
+            if (!Dictionary.toggleState["Aim Assist"] || !Dictionary.toggleState["Show Detected Player"]) return;
+
+        }
+        private void CheckSprayRelease()
         {
-            if (DetectedPlayerOverlay == null) return;
-            if (!Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c02])) return;
+            if (!Dictionary.toggleState["Spray Mode"]) return;
 
-            Application.Current.Dispatcher.BeginInvoke(() =>
+            // if auto trigger is disabled, we reset the spray state
+            // if the aim keybinds are not held, we reset the spray state
+            bool shouldSpray = Dictionary.toggleState["Auto Trigger"] &&
+                (InputBindingManager.IsHoldingBinding("Aim Keybind") && InputBindingManager.IsHoldingBinding("Second Aim Keybind")); //||
+                                                                                                                                     //Dictionary.toggleState["Constant AI Tracking"];
+
+            // spray mode might need to be revised - taylor
+            if (!shouldSpray)
             {
-                if (Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2E]))
-                    DetectedPlayerOverlay.DetectedPlayerConfidence.Opacity = 0;
-
-                if (Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2F]))
-                    DetectedPlayerOverlay.DetectedTracers.Opacity = 0;
-
-                DetectedPlayerOverlay.DetectedPlayerFocus.Opacity = 0;
-            });
+                MouseManager.ResetSprayState();
+            }
         }
 
-        private void _mO08(DetectedPlayerWindow? DetectedPlayerOverlay, Prediction closestPrediction)
+        private async void UpdateFOV()
+        {
+            if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse" && Dictionary.toggleState["FOV"])
+            {
+                var mousePosition = WinAPICaller.GetCursorPosition();
+
+                // Check if mouse is on the current display
+                if (!DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePosition.X, mousePosition.Y)))
+                {
+                    // Mouse is on a different display - don't update FOV position
+                    return;
+                }
+
+                // Translate mouse position relative to current display
+                var displayRelativeX = mousePosition.X - DisplayManager.ScreenLeft;
+                var displayRelativeY = mousePosition.Y - DisplayManager.ScreenTop;
+
+                await Application.Current.Dispatcher.BeginInvoke(() =>
+                    Dictionary.FOVWindow.FOVStrictEnclosure.Margin = new Thickness(
+                        Convert.ToInt16(displayRelativeX / WinAPICaller.scalingFactorX) - 320, // this is based off the window size, not the size of the model -whip
+                        Convert.ToInt16(displayRelativeY / WinAPICaller.scalingFactorY) - 320, 0, 0));
+            }
+        }
+
+        private static void DisableOverlay(DetectedPlayerWindow DetectedPlayerOverlay)
+        {
+            if (Dictionary.toggleState["Show Detected Player"] && Dictionary.DetectedPlayerOverlay != null)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (Dictionary.toggleState["Show AI Confidence"])
+                    {
+                        DetectedPlayerOverlay!.DetectedPlayerConfidence.Opacity = 0;
+                    }
+
+                    if (Dictionary.toggleState["Show Tracers"])
+                    {
+                        DetectedPlayerOverlay!.DetectedTracers.Opacity = 0;
+                    }
+
+                    DetectedPlayerOverlay!.DetectedPlayerFocus.Opacity = 0;
+                });
+            }
+        }
+
+        private void UpdateOverlay(DetectedPlayerWindow DetectedPlayerOverlay, Prediction closestPrediction)
         {
             var scalingFactorX = WinAPICaller.scalingFactorX;
             var scalingFactorY = WinAPICaller.scalingFactorY;
 
-            var displayRelativeX = _fD05x.X - DisplayManager.ScreenLeft;
-            var displayRelativeY = _fD05x.Y - DisplayManager.ScreenTop;
+            // Convert screen coordinates to display-relative coordinates
+            var displayRelativeX = LastDetectionBox.X - DisplayManager.ScreenLeft;
+            var displayRelativeY = LastDetectionBox.Y - DisplayManager.ScreenTop;
 
-            var centerX = Convert.ToInt16(displayRelativeX / scalingFactorX) + (_fD05x.Width / 2.0);
+            // Calculate center position in display-relative coordinates
+            var centerX = Convert.ToInt16(displayRelativeX / scalingFactorX) + (LastDetectionBox.Width / 2.0);
             var centerY = Convert.ToInt16(displayRelativeY / scalingFactorY);
 
-            Application.Current.Dispatcher.BeginInvoke(() =>
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                if (DetectedPlayerOverlay == null) return;
-                if (Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2E]))
+                if (Dictionary.toggleState["Show AI Confidence"])
                 {
                     DetectedPlayerOverlay.DetectedPlayerConfidence.Opacity = 1;
                     DetectedPlayerOverlay.DetectedPlayerConfidence.Content = $"{closestPrediction.ClassName}: {Math.Round((AIConf * 100), 2)}%";
@@ -578,216 +689,323 @@ namespace Venkatesh2.AILogic
                         centerX - labelEstimatedHalfWidth,
                         centerY - DetectedPlayerOverlay.DetectedPlayerConfidence.ActualHeight - 2, 0, 0);
                 }
-                bool showTracers = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c2F]);
+                var showTracers = Dictionary.toggleState["Show Tracers"];
                 DetectedPlayerOverlay.DetectedTracers.Opacity = showTracers ? 1 : 0;
                 if (showTracers)
                 {
-                    string tracerPosition = Convert.ToString(Dictionary.dropdownState[_xB9D2._c30]) ?? _xB9D2._c18;
+                    var tracerPosition = Dictionary.dropdownState["Tracer Position"];
 
                     var boxTop = centerY;
-                    var boxBottom = centerY + _fD05x.Height;
+                    var boxBottom = centerY + LastDetectionBox.Height;
                     var boxHorizontalCenter = centerX;
-                    var boxVerticalCenter = centerY + (_fD05x.Height / 2.0);
-                    var boxLeft = centerX - (_fD05x.Width / 2.0);
-                    var boxRight = centerX + (_fD05x.Width / 2.0);
+                    var boxVerticalCenter = centerY + (LastDetectionBox.Height / 2.0);
+                    var boxLeft = centerX - (LastDetectionBox.Width / 2.0);
+                    var boxRight = centerX + (LastDetectionBox.Width / 2.0);
 
-                    if (tracerPosition == "Top")
+                    switch (tracerPosition)
                     {
-                        DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
-                        DetectedPlayerOverlay.DetectedTracers.Y2 = boxTop;
-                    }
-                    else if (tracerPosition == _xB9D2._c18)
-                    {
-                        DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
-                        DetectedPlayerOverlay.DetectedTracers.Y2 = boxBottom;
-                    }
-                    else if (tracerPosition == "Middle")
-                    {
-                        var screenHorizontalCenter = DisplayManager.ScreenWidth / (2.0 * WinAPICaller.scalingFactorX);
-                        if (boxHorizontalCenter < screenHorizontalCenter)
-                        {
-                            DetectedPlayerOverlay.DetectedTracers.X2 = boxRight;
-                            DetectedPlayerOverlay.DetectedTracers.Y2 = boxVerticalCenter;
-                        }
-                        else
-                        {
-                            DetectedPlayerOverlay.DetectedTracers.X2 = boxLeft;
-                            DetectedPlayerOverlay.DetectedTracers.Y2 = boxVerticalCenter;
-                        }
-                    }
-                    else
-                    {
-                        DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
-                        DetectedPlayerOverlay.DetectedTracers.Y2 = boxBottom;
+                        case "Top":
+                            DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
+                            DetectedPlayerOverlay.DetectedTracers.Y2 = boxTop;
+                            break;
+
+                        case "Bottom":
+                            DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
+                            DetectedPlayerOverlay.DetectedTracers.Y2 = boxBottom;
+                            break;
+
+                        case "Middle":
+                            var screenHorizontalCenter = DisplayManager.ScreenWidth / (2.0 * WinAPICaller.scalingFactorX);
+                            if (boxHorizontalCenter < screenHorizontalCenter)
+                            {
+                                // if the box is on the left half of the screen, aim for the right-middle of the box
+                                DetectedPlayerOverlay.DetectedTracers.X2 = boxRight;
+                                DetectedPlayerOverlay.DetectedTracers.Y2 = boxVerticalCenter;
+                            }
+                            else
+                            {
+                                // if the box is on the right half, aim for the left-middle
+                                DetectedPlayerOverlay.DetectedTracers.X2 = boxLeft;
+                                DetectedPlayerOverlay.DetectedTracers.Y2 = boxVerticalCenter;
+                            }
+                            break;
+
+                        default:
+                            // default to the bottom-center if the setting is unrecognized
+                            DetectedPlayerOverlay.DetectedTracers.X2 = boxHorizontalCenter;
+                            DetectedPlayerOverlay.DetectedTracers.Y2 = boxBottom;
+                            break;
                     }
                 }
 
-                DetectedPlayerOverlay.Opacity = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c31]);
+                DetectedPlayerOverlay.Opacity = Dictionary.sliderSettings["Opacity"];
 
                 DetectedPlayerOverlay.DetectedPlayerFocus.Opacity = 1;
                 DetectedPlayerOverlay.DetectedPlayerFocus.Margin = new Thickness(
-                    centerX - (_fD05x.Width / 2.0), centerY, 0, 0);
-                DetectedPlayerOverlay.DetectedPlayerFocus.Width = _fD05x.Width;
-                DetectedPlayerOverlay.DetectedPlayerFocus.Height = _fD05x.Height;
+                    centerX - (LastDetectionBox.Width / 2.0), centerY, 0, 0);
+                DetectedPlayerOverlay.DetectedPlayerFocus.Width = LastDetectionBox.Width;
+                DetectedPlayerOverlay.DetectedPlayerFocus.Height = LastDetectionBox.Height;
             });
         }
 
-        private void _mC09(DetectedPlayerWindow? DetectedPlayerOverlay, Prediction closestPrediction, float scaleX, float scaleY)
+        private void CalculateCoordinates(DetectedPlayerWindow DetectedPlayerOverlay, Prediction closestPrediction, float scaleX, float scaleY)
         {
             AIConf = closestPrediction.Confidence;
 
-            if (_fA24 && DetectedPlayerOverlay != null)
+            if (Dictionary.toggleState["Show Detected Player"] && Dictionary.DetectedPlayerOverlay != null)
             {
-                _mO08(DetectedPlayerOverlay, closestPrediction);
-                if (!_fA23) return;
+                using (Benchmark("UpdateOverlay"))
+                {
+                    UpdateOverlay(DetectedPlayerOverlay!, closestPrediction);
+                }
+                if (!Dictionary.toggleState["Aim Assist"]) return;
             }
+
+            double YOffset = Dictionary.sliderSettings["Y Offset (Up/Down)"];
+            double XOffset = Dictionary.sliderSettings["X Offset (Left/Right)"];
+
+            double YOffsetPercentage = Dictionary.sliderSettings["Y Offset (%)"];
+            double XOffsetPercentage = Dictionary.sliderSettings["X Offset (%)"];
 
             var rect = closestPrediction.Rectangle;
 
-            _fDX = _fA27
-                ? (int)((rect.X + rect.Width * (_fA31 / 100)) * scaleX)
-                : (int)((rect.X + rect.Width / 2) * scaleX + _fA2F);
+            if (Dictionary.toggleState["X Axis Percentage Adjustment"])
+            {
+                detectedX = (int)((rect.X + (rect.Width * (XOffsetPercentage / 100))) * scaleX);
+            }
+            else
+            {
+                detectedX = (int)((rect.X + rect.Width / 2) * scaleX + XOffset);
+            }
 
-            _fDY = _fA28
-                ? (int)((rect.Y + rect.Height - rect.Height * (_fA30 / 100)) * scaleY + _fA2E)
-                : _mY0A(scaleY, _fA2E, closestPrediction);
+            if (Dictionary.toggleState["Y Axis Percentage Adjustment"])
+            {
+                detectedY = (int)((rect.Y + rect.Height - (rect.Height * (YOffsetPercentage / 100))) * scaleY + YOffset);
+            }
+            else
+            {
+                detectedY = CalculateDetectedY(scaleY, YOffset, closestPrediction);
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int _mY0A(float scaleY, double yOffset, Prediction closestPrediction)
+        private static int CalculateDetectedY(float scaleY, double YOffset, Prediction closestPrediction)
         {
             var rect = closestPrediction.Rectangle;
-            float yAdjustment = _fA33 == _xB9D2._c17 ? rect.Height / 2
-                              : _fA33 == _xB9D2._c18 ? rect.Height
-                              : 0f;
-            return (int)((rect.Y + yAdjustment) * scaleY + yOffset);
-        }
+            float yBase = rect.Y;
+            float yAdjustment = 0;
 
-        private void _mH0A2(Prediction closestPrediction)
-        {
-            if (_fA23 &&
-                (_fA25 ||
-                 InputBindingManager.IsHoldingBinding(_xB9D2._c15) ||
-                 InputBindingManager.IsHoldingBinding(_xB9D2._c16)))
+            switch (Dictionary.dropdownState["Aiming Boundaries Alignment"])
             {
-                MouseManager.MoveCrosshair(_fDX, _fDY);
+                case "Center":
+                    yAdjustment = rect.Height / 2;
+                    break;
+
+                case "Top":
+                    // yBase is already at the top
+                    break;
+
+                case "Bottom":
+                    yAdjustment = rect.Height;
+                    break;
             }
+
+            return (int)((yBase + yAdjustment) * scaleY + YOffset);
         }
 
-        private Prediction? _mG0B()
+        private void HandleAim(Prediction closestPrediction)
         {
-            uint _jv = unchecked((uint)(_fI01 ^ 0xBEEF)) & 0u; _ = _jv;
-            if (_fA2B)
+            if (Dictionary.toggleState["Aim Assist"] &&
+                (Dictionary.toggleState["Constant AI Tracking"] ||
+                 Dictionary.toggleState["Aim Assist"] && InputBindingManager.IsHoldingBinding("Aim Keybind") ||
+                 Dictionary.toggleState["Aim Assist"] && InputBindingManager.IsHoldingBinding("Second Aim Keybind")))
             {
-                var mousePos = _fA34;
-                if (DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
+                if (Dictionary.toggleState["Predictions"])
                 {
-                    _fTX = mousePos.X;
-                    _fTY = mousePos.Y;
+                    HandlePredictions(kalmanPrediction, closestPrediction, detectedX, detectedY);
                 }
                 else
                 {
-                    _fTX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
-                    _fTY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
+                    MouseManager.MoveCrosshair(detectedX, detectedY);
+                }
+            }
+        }
+
+        private void HandlePredictions(KalmanPrediction kalmanPrediction, Prediction closestPrediction, int detectedX, int detectedY)
+        {
+            var predictionMethod = Dictionary.dropdownState["Prediction Method"];
+            switch (predictionMethod)
+            {
+                case "Kalman Filter":
+                    KalmanPrediction.Detection detection = new()
+                    {
+                        X = detectedX,
+                        Y = detectedY,
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    kalmanPrediction.UpdateKalmanFilter(detection);
+                    var predictedPosition = kalmanPrediction.GetKalmanPosition();
+
+                    MouseManager.MoveCrosshair(predictedPosition.X, predictedPosition.Y);
+                    break;
+
+                case "Shall0e's Prediction":
+                    // Update position (calculates velocity internally)
+                    ShalloePredictionV2.UpdatePosition(detectedX, detectedY);
+
+                    // Get predicted position
+                    MouseManager.MoveCrosshair(ShalloePredictionV2.GetSPX(), ShalloePredictionV2.GetSPY());
+                    break;
+
+                case "wisethef0x's EMA Prediction":
+                    WiseTheFoxPrediction.WTFDetection wtfdetection = new()
+                    {
+                        X = detectedX,
+                        Y = detectedY,
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    wtfpredictionManager.UpdateDetection(wtfdetection);
+                    var wtfpredictedPosition = wtfpredictionManager.GetEstimatedPosition();
+
+                    // Use both predicted X and Y
+                    MouseManager.MoveCrosshair(wtfpredictedPosition.X, wtfpredictedPosition.Y);
+                    break;
+            }
+        }
+
+        private async Task<Prediction?> GetClosestPrediction(bool useMousePosition = true)
+        {
+            //whats these variables for? - taylor 
+            //int adjustedTargetX, adjustedTargetY;
+
+            if (Dictionary.dropdownState["Detection Area Type"] == "Closest to Mouse")
+            {
+                var mousePos = WinAPICaller.GetCursorPosition();
+
+                // Check if mouse is on the current display
+                if (DisplayManager.IsPointInCurrentDisplay(new System.Windows.Point(mousePos.X, mousePos.Y)))
+                {
+                    // Mouse is on current display, use its position
+                    targetX = mousePos.X;
+                    targetY = mousePos.Y;
+                }
+                else
+                {
+                    // Mouse is on different display, use center of current display
+                    targetX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
+                    targetY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
                 }
             }
             else
             {
-                _fTX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
-                _fTY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
+                // Center of current display
+                targetX = DisplayManager.ScreenLeft + (DisplayManager.ScreenWidth / 2);
+                targetY = DisplayManager.ScreenTop + (DisplayManager.ScreenHeight / 2);
             }
 
-            Rectangle detectionBox = new(_fTX - IMAGE_SIZE / 2, _fTY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE);
+            Rectangle detectionBox = new(targetX - IMAGE_SIZE / 2, targetY - IMAGE_SIZE / 2, IMAGE_SIZE, IMAGE_SIZE); // Detection box dynamic size
+
+            Bitmap? frame;
+
+            using (Benchmark("ScreenGrab"))
+            {
+                frame = _captureManager.ScreenGrab(detectionBox);
+            }
+
+            if (frame == null) return null;
 
             IDisposableReadOnlyCollection<DisposableNamedOnnxValue>? results = null;
             Tensor<float>? outputTensor = null;
 
             try
             {
-                if (_fR14 == null
-                    || _fR14.Length != 3 * IMAGE_SIZE * IMAGE_SIZE
-                    || _fR13 == null
-                    || _fR13.Dimensions[2] != IMAGE_SIZE)
+                float[] inputArray;
+                using (Benchmark("BitmapToFloatArray"))
                 {
-                    _fR14 = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
-                    _fR13 = new DenseTensor<float>(_fR14, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
-                    _fR15 = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _fR13) };
+                    if (_reusableInputArray == null || _reusableInputArray.Length != 3 * IMAGE_SIZE * IMAGE_SIZE)
+                    {
+                        _reusableInputArray = new float[3 * IMAGE_SIZE * IMAGE_SIZE];
+                    }
+                    inputArray = _reusableInputArray;
+
+                    // Fill the reusable array
+                    BitmapToFloatArrayInPlace(frame, inputArray, IMAGE_SIZE);
                 }
 
-                Bitmap? frame = _fP3B._mC06(detectionBox, _fR14!, IMAGE_SIZE, _fA29);
+                // Reuse tensor and inputs - recreate if size changed
+                /// this needs to be revised !!!!! - taylor
+                if (_reusableTensor == null || _reusableTensor.Dimensions[2] != IMAGE_SIZE)
+                {
+                    _reusableTensor = new DenseTensor<float>(inputArray, new int[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+                    _reusableInputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("images", _reusableTensor) };
+                }
+                else
+                {
+                    // Directly copy into existing DenseTensor buffer
+                    inputArray.AsSpan().CopyTo(_reusableTensor.Buffer.Span);
+                }
 
-                if (_fX0C == null) return null;
-                results = _fX0C.Run(_fR15, _fN06, _fO0D);
-                outputTensor = results[0].AsTensor<float>();
+                if (_onnxModel == null) return null;
+                using (Benchmark("ModelInference"))
+                {
+                    results = _onnxModel.Run(_reusableInputs, _outputNames, _modeloptions);
+                    outputTensor = results[0].AsTensor<float>();
+                }
 
                 if (outputTensor == null)
                 {
                     Log(LogLevel.Error, "Model inference returned null output tensor.", true, 2000);
-                    _mS14(frame);
+                    SaveFrame(frame);
                     return null;
                 }
 
-                float fovMinX, fovMaxX, fovMinY, fovMaxY;
-                if (_fA2A)
-                {
-                    fovMinX = (IMAGE_SIZE - _fA2C) / 2.0f;
-                    fovMaxX = (IMAGE_SIZE + _fA2C) / 2.0f;
-                }
-                else
-                {
-                    fovMinX = -IMAGE_SIZE;
-                    fovMaxX = IMAGE_SIZE * 2f;
-                }
-                fovMinY = fovMinX;
-                fovMaxY = fovMaxX;
+                // Calculate the FOV boundaries
+                float FovSize = (float)Dictionary.sliderSettings["FOV Size"];
+                float fovMinX = (IMAGE_SIZE - FovSize) / 2.0f;
+                float fovMaxX = (IMAGE_SIZE + FovSize) / 2.0f;
+                float fovMinY = (IMAGE_SIZE - FovSize) / 2.0f;
+                float fovMaxY = (IMAGE_SIZE + FovSize) / 2.0f;
 
-                List<Prediction> KDPredictions = _mK12(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
+                //List<double[]> KDpoints;
+                List<Prediction> KDPredictions;
+                using (Benchmark("PrepareKDTreeData"))
+                {
+                    KDPredictions = PrepareKDTreeData(outputTensor, detectionBox, fovMinX, fovMaxX, fovMinY, fovMaxY);
+                }
 
                 if (KDPredictions.Count == 0)
                 {
-                    _mS14(frame);
-                    if (_fA26 && _fT07 != null)
-                    {
-                        Prediction? graceTarget = _mN0F();
-                        if (graceTarget != null)
-                            _mU11(graceTarget, detectionBox);
-                        return graceTarget;
-                    }
+                    SaveFrame(frame);
                     return null;
                 }
 
+                //kdtree was replaced with linear search
                 Prediction? bestCandidate = null;
                 double bestDistSq = double.MaxValue;
                 double center = IMAGE_SIZE / 2.0;
 
-                foreach (var p in KDPredictions)
+                // TODO: Optimize this linear search further if needed
+                // TODO: Consider updating KD-Tree and adding options to switch from linear to kd.
+                // we can honestly replacing linear search by letting sticky aim handle the search
+                using (Benchmark("LinearSearch"))
                 {
-                    var dx = p.CenterXTranslated * IMAGE_SIZE - center;
-                    var dy = p.CenterYTranslated * IMAGE_SIZE - center;
-                    double d2 = dx * dx + dy * dy;
-
-                    if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
-                }
-
-                if (bestCandidate != null)
-                {
-                    double tieZone = bestCandidate.Rectangle.Width * bestCandidate.Rectangle.Height;
                     foreach (var p in KDPredictions)
                     {
-                        if (p == bestCandidate) continue;
                         var dx = p.CenterXTranslated * IMAGE_SIZE - center;
                         var dy = p.CenterYTranslated * IMAGE_SIZE - center;
-                        double d2 = dx * dx + dy * dy;
-                        if (d2 - bestDistSq < tieZone && p.Confidence > bestCandidate.Confidence)
-                            bestCandidate = p;
+                        double d2 = dx * dx + dy * dy; // dx^2 + dy^2
+
+                        if (d2 < bestDistSq) { bestDistSq = d2; bestCandidate = p; }
                     }
                 }
 
-                Prediction? finalTarget = _mS0C(bestCandidate, KDPredictions);
+                Prediction? finalTarget = HandleStickyAim(bestCandidate, KDPredictions);
                 if (finalTarget != null)
                 {
-                    _mU11(finalTarget, detectionBox);
-                    _mS14(frame, finalTarget);
+                    UpdateDetectionBox(finalTarget, detectionBox);
+                    SaveFrame(frame, finalTarget);
                     return finalTarget;
                 }
 
@@ -795,389 +1013,218 @@ namespace Venkatesh2.AILogic
             }
             finally
             {
+                // Always dispose the cloned frame to prevent memory leaks
+                frame.Dispose();
                 results?.Dispose();
             }
         }
 
-        private Prediction? _mS0C(Prediction? bestCandidate, List<Prediction> KDPredictions)
+        private Prediction? HandleStickyAim(Prediction? bestCandidate, List<Prediction> KDPredictions)
         {
-            uint _jv = unchecked((uint)((_fA0E + 1) ^ 0xCAFE)) & 0u; _ = _jv;
-            if (!_fA26)
+            if (!Dictionary.toggleState["Sticky Aim"])
             {
-                _mX10();
-
-                if (_fH06 && bestCandidate != null && KDPredictions != null)
-                {
-                    Prediction? continued = null;
-                    float contIoU = 0f;
-                    foreach (var c in KDPredictions)
-                    {
-                        float iou = _mI0D(c.Rectangle, _fR05);
-                        if (iou > contIoU) { contIoU = iou; continued = c; }
-                    }
-
-                    if (continued != null && contIoU >= 0.15f && continued != bestCandidate)
-                    {
-                        float half = IMAGE_SIZE / 2f;
-                        float bx = bestCandidate.CenterXTranslated * IMAGE_SIZE - half;
-                        float by = bestCandidate.CenterYTranslated * IMAGE_SIZE - half;
-                        float bestDSq = bx * bx + by * by;
-
-                        float lx = continued.CenterXTranslated * IMAGE_SIZE - half;
-                        float ly = continued.CenterYTranslated * IMAGE_SIZE - half;
-                        float contDSq = lx * lx + ly * ly;
-
-                        float tieZone = continued.Rectangle.Width * continued.Rectangle.Height;
-                        if (contDSq - bestDSq < tieZone)
-                            bestCandidate = continued;
-                    }
-                }
-
-                _fH06 = bestCandidate != null;
-                if (bestCandidate != null)
-                    _fR05 = bestCandidate.Rectangle;
-
+                _currentTarget = bestCandidate;
+                ResetStickyAimState();
                 return bestCandidate;
             }
 
+            // No detections available
             if (bestCandidate == null || KDPredictions == null || KDPredictions.Count == 0)
-                return _mN0F();
-
-            if (_fT07 == null)
             {
-                float half = IMAGE_SIZE / 2f;
-                Prediction? nearest = null;
-                float nearestDistSq = float.MaxValue;
-                foreach (var candidate in KDPredictions)
-                {
-                    float dx = candidate.CenterXTranslated * IMAGE_SIZE - half;
-                    float dy = candidate.CenterYTranslated * IMAGE_SIZE - half;
-                    float dSq = dx * dx + dy * dy;
-                    if (dSq < nearestDistSq) { nearestDistSq = dSq; nearest = candidate; }
-                }
-                if (nearest == null) return null;
-                float tieZone = nearest.Rectangle.Width * nearest.Rectangle.Height;
-                foreach (var candidate in KDPredictions)
-                {
-                    if (candidate == nearest) continue;
-                    float dx = candidate.CenterXTranslated * IMAGE_SIZE - half;
-                    float dy = candidate.CenterYTranslated * IMAGE_SIZE - half;
-                    float dSq = dx * dx + dy * dy;
-                    if (dSq - nearestDistSq < tieZone && candidate.Confidence > nearest.Confidence)
-                        nearest = candidate;
-                }
-                return _mQ0E(nearest);
+                return HandleNoDetections();
             }
 
-            float lastX = _fT07.ScreenCenterX;
-            float lastY = _fT07.ScreenCenterY;
-            float targetArea = _fT07.Rectangle.Width * _fT07.Rectangle.Height;
+            _consecutiveFramesWithoutTarget = 0;
+
+            // Screen center (where user is aiming)
+            float screenCenterX = IMAGE_SIZE / 2f;
+            float screenCenterY = IMAGE_SIZE / 2f;
+
+            // STEP 1: Find what the user is aiming at (closest to crosshair)
+            Prediction? aimTarget = null;
+            float nearestToCrosshairDistSq = float.MaxValue;
+
+            foreach (var candidate in KDPredictions)
+            {
+                float distSq = GetDistanceSq(candidate.ScreenCenterX, candidate.ScreenCenterY, screenCenterX, screenCenterY);
+                if (distSq < nearestToCrosshairDistSq)
+                {
+                    nearestToCrosshairDistSq = distSq;
+                    aimTarget = candidate;
+                }
+            }
+
+            if (aimTarget == null)
+            {
+                return HandleNoDetections();
+            }
+
+            // No current target - acquire what user is aiming at
+            if (_currentTarget == null)
+            {
+                return AcquireNewTarget(aimTarget);
+            }
+
+            // STEP 2: Is the aim target the SAME as our current target?
+            float lastX = _currentTarget.ScreenCenterX;
+            float lastY = _currentTarget.ScreenCenterY;
+            float targetArea = _currentTarget.Rectangle.Width * _currentTarget.Rectangle.Height;
             float targetSize = MathF.Sqrt(targetArea);
-            float sizeFactor = _mZ0E2(targetArea);
+            float sizeFactor = GetSizeFactor(targetArea);
 
-            float maxRadius = IMAGE_SIZE * 0.5f;
-            float trackingRadiusX = Math.Min(targetSize * 3f, maxRadius);
-            float trackingRadiusY = Math.Min(targetSize * 4.5f, maxRadius * 1.5f);
+            // Distance from aim target to our current target's last position
+            float aimToCurrentDistSq = GetDistanceSq(aimTarget.ScreenCenterX, aimTarget.ScreenCenterY, lastX, lastY);
 
-            float velMagSq = _fVX09 * _fVX09 + _fVY0A * _fVY0A;
-            float dt = _fW08 + 1f;
-            float expectedX = lastX + _fVX09 * dt + 0.5f * _fAX0B * dt * dt;
-            float expectedY = lastY + _fVY0A * dt + 0.5f * _fAY0C * dt * dt;
+            // Tracking radius based on target size - larger targets have larger radius
+            float trackingRadius = targetSize * 3f;
+            float trackingRadiusSq = trackingRadius * trackingRadius;
 
-            var currentRect = _fT07.Rectangle;
-            RectangleF extrapolatedBox = new(
-                currentRect.X + _fVX09 * dt + 0.5f * _fAX0B * dt * dt,
-                currentRect.Y + _fVY0A * dt + 0.5f * _fAY0C * dt * dt,
-                currentRect.Width,
-                currentRect.Height);
+            // Check size similarity
+            float aimTargetArea = aimTarget.Rectangle.Width * aimTarget.Rectangle.Height;
+            float sizeRatio = MathF.Min(targetArea, aimTargetArea) / MathF.Max(targetArea, aimTargetArea);
 
-            float imageArea = IMAGE_SIZE * IMAGE_SIZE;
-            float minSizeRatio = targetArea > imageArea * 0.15f ? 0.2f : 0.4f;
+            // Is the aim target the same as our current target?
+            // Same if: close to last position AND similar size
+            bool isSameTarget = (aimToCurrentDistSq < trackingRadiusSq) && (sizeRatio > 0.5f);
 
-            Prediction? trackedMatch = null;
-            float bestIoU = 0f;
-
-            foreach (var candidate in KDPredictions)
+            if (isSameTarget)
             {
-                float candidateArea = candidate.Rectangle.Width * candidate.Rectangle.Height;
-                float sizeRatio = MathF.Min(targetArea, candidateArea) / MathF.Max(targetArea, candidateArea);
-                if (sizeRatio < minSizeRatio) continue;
-
-                float iou = _mI0D(candidate.Rectangle, extrapolatedBox);
-                if (iou > bestIoU) { bestIoU = iou; trackedMatch = candidate; }
+                // User is still aiming at current target - update and continue
+                _framesWithoutMatch = 0;
+                UpdateVelocity(aimTarget, sizeFactor);
+                _targetLockScore = Math.Min(MAX_LOCK_SCORE, _targetLockScore + LOCK_SCORE_GAIN);
+                _currentTarget = aimTarget;
+                return aimTarget;
             }
 
-            if (trackedMatch != null && bestIoU >= 0.15f)
+            // STEP 3: User is aiming at a DIFFERENT target
+            // But we need hysteresis - don't switch on single-frame jitter
+            _framesWithoutMatch++;
+
+            // Quick switch if aim target is very close to crosshair (user clearly aiming at it)
+            float stickyThreshold = (float)Dictionary.sliderSettings["Sticky Aim Threshold"];
+            bool aimTargetVeryCentered = nearestToCrosshairDistSq < (stickyThreshold * stickyThreshold * 0.25f);
+
+            if (aimTargetVeryCentered || _framesWithoutMatch >= 3)
             {
-                _fA0E++;
-                int missed = _fW08;
-                _fW08 = 0;
-                _mM0G(trackedMatch, sizeFactor, missed);
-                _fT07 = trackedMatch;
-                return trackedMatch;
+                // User has clearly moved to new target - switch
+                return AcquireNewTarget(aimTarget);
             }
 
-            trackedMatch = null;
-            float bestProximitySq = float.MaxValue;
-
-            foreach (var candidate in KDPredictions)
-            {
-                float candidateArea = candidate.Rectangle.Width * candidate.Rectangle.Height;
-                float sizeRatio = MathF.Min(targetArea, candidateArea) / MathF.Max(targetArea, candidateArea);
-                if (sizeRatio < minSizeRatio) continue;
-
-                float distToExpectedSq = _mG0D(candidate.ScreenCenterX, candidate.ScreenCenterY, expectedX, expectedY);
-                float distToLastSq = _mG0D(candidate.ScreenCenterX, candidate.ScreenCenterY, lastX, lastY);
-
-                float ndxLast = (candidate.ScreenCenterX - lastX) / trackingRadiusX;
-                float ndyLast = (candidate.ScreenCenterY - lastY) / trackingRadiusY;
-                float ellipseDistLastSq = ndxLast * ndxLast + ndyLast * ndyLast;
-
-                float ndxExp = (candidate.ScreenCenterX - expectedX) / trackingRadiusX;
-                float ndyExp = (candidate.ScreenCenterY - expectedY) / trackingRadiusY;
-                float ellipseDistExpSq = ndxExp * ndxExp + ndyExp * ndyExp;
-
-                if (!(ellipseDistLastSq < 1f || ellipseDistExpSq < 1f))
-                    continue;
-
-                float proximityScore = velMagSq > 4f ? distToExpectedSq : distToLastSq;
-                if (proximityScore < bestProximitySq)
-                {
-                    bestProximitySq = proximityScore;
-                    trackedMatch = candidate;
-                }
-            }
-
-            if (trackedMatch != null)
-            {
-                _fA0E++;
-                int missed = _fW08;
-                _fW08 = 0;
-                _mM0G(trackedMatch, sizeFactor, missed);
-                _fT07 = trackedMatch;
-                return trackedMatch;
-            }
-
-            return _mN0F();
+            // Not ready to switch yet - return null to avoid flicking
+            // (Don't return old target position, don't return new target position)
+            return null;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float _mG0D(float x1, float y1, float x2, float y2)
+        private static float GetDistanceSq(float x1, float y1, float x2, float y2)
         {
             float dx = x1 - x2;
             float dy = y1 - y2;
             return dx * dx + dy * dy;
         }
 
+        /// <summary>
+        /// Returns a scaling factor based on target size. Smaller targets (further away) get higher factors
+        /// to make thresholds more forgiving and filtering more aggressive.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float _mI0D(RectangleF a, RectangleF b)
+        private float GetSizeFactor(float targetArea)
         {
-            float x1 = MathF.Max(a.X, b.X);
-            float y1 = MathF.Max(a.Y, b.Y);
-            float x2 = MathF.Min(a.X + a.Width, b.X + b.Width);
-            float y2 = MathF.Min(a.Y + a.Height, b.Y + b.Height);
-
-            if (x2 <= x1 || y2 <= y1) return 0f;
-
-            float intersection = (x2 - x1) * (y2 - y1);
-            float union = a.Width * a.Height + b.Width * b.Height - intersection;
-            return union > 0f ? intersection / union : 0f;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private float _mZ0E2(float targetArea)
-        {
-            float ratio = _fR19 / Math.Max(targetArea, 100f);
+            // sizeFactor: 1.0 for large/close targets, up to 3.0 for small/distant targets
+            // This makes distant targets more "sticky" to compensate for detection jitter
+            float ratio = REFERENCE_TARGET_SIZE / Math.Max(targetArea, 100f);
             return Math.Clamp(ratio, 1.0f, 3.0f);
         }
 
-        private Prediction? _mN0F()
+        private Prediction? HandleNoDetections()
         {
-            if (_fT07 != null)
+            if (_currentTarget != null && ++_consecutiveFramesWithoutTarget <= MAX_FRAMES_WITHOUT_TARGET)
             {
-                float velMag = MathF.Sqrt(_fVX09 * _fVX09 + _fVY0A * _fVY0A);
-                float lastArea = _fT07.Rectangle.Width * _fT07.Rectangle.Height;
-                bool closeRange = lastArea > IMAGE_SIZE * IMAGE_SIZE * 0.15f;
-                int ageBonus = Math.Min(_fA0E / 10, 3);
-                int dynamicGrace = (velMag > 5f ? 6 : velMag > 2f ? 4 : closeRange ? 4 : 2) + ageBonus;
+                // Decay lock score during grace period
+                _targetLockScore *= LOCK_SCORE_DECAY;
 
-                if (++_fW08 <= dynamicGrace)
+                // Return predicted position instead of stale position
+                var predicted = new Prediction
                 {
-                    float t = _fW08;
-                    float decayRate = 1f / (dynamicGrace + 1);
-                    float extraX = _fVX09 * t + 0.5f * _fAX0B * t * t;
-                    float extraY = _fVY0A * t + 0.5f * _fAY0C * t * t;
-                    var lastRect = _fT07.Rectangle;
-                    _fG17.ScreenCenterX      = _fT07.ScreenCenterX + extraX;
-                    _fG17.ScreenCenterY      = _fT07.ScreenCenterY + extraY;
-                    _fG17.Rectangle          = new RectangleF(lastRect.X + extraX, lastRect.Y + extraY, lastRect.Width, lastRect.Height);
-                    _fG17.Confidence         = _fT07.Confidence * (1f - t * decayRate);
-                    _fG17.ClassId            = _fT07.ClassId;
-                    _fG17.ClassName          = _fT07.ClassName;
-                    _fG17.CenterXTranslated  = _fT07.CenterXTranslated;
-                    _fG17.CenterYTranslated  = _fT07.CenterYTranslated;
-                    return _fG17;
-                }
+                    ScreenCenterX = _currentTarget.ScreenCenterX + _lastTargetVelocityX * _consecutiveFramesWithoutTarget,
+                    ScreenCenterY = _currentTarget.ScreenCenterY + _lastTargetVelocityY * _consecutiveFramesWithoutTarget,
+                    Rectangle = _currentTarget.Rectangle,
+                    Confidence = _currentTarget.Confidence * (1f - _consecutiveFramesWithoutTarget * 0.2f),
+                    ClassId = _currentTarget.ClassId,
+                    ClassName = _currentTarget.ClassName,
+                    CenterXTranslated = _currentTarget.CenterXTranslated,
+                    CenterYTranslated = _currentTarget.CenterYTranslated
+                };
+                return predicted;
             }
 
-            _mX10();
+            ResetStickyAimState();
             return null;
         }
 
-        private Prediction _mQ0E(Prediction target)
+        private Prediction AcquireNewTarget(Prediction target)
         {
-            _fVX09 = 0f;
-            _fVY0A = 0f;
-            _fAX0B = 0f;
-            _fAY0C = 0f;
-            _fA0E = 0;
-            _fT07 = target;
+            _lastTargetVelocityX = 0f;
+            _lastTargetVelocityY = 0f;
+            _targetLockScore = LOCK_SCORE_GAIN; // Start with some lock score
+            _framesWithoutMatch = 0;
+            _currentTarget = target;
             return target;
         }
 
-        private void _mM0G(Prediction newTarget, float sizeFactor, int missedFrames = 0)
+        private void UpdateVelocity(Prediction newTarget, float sizeFactor)
         {
-            if (_fT07 == null) return;
+            if (_currentTarget != null)
+            {
+                // EMA smoothing on velocity to reduce noise
+                // Use heavier smoothing for smaller/distant targets (more weight on old velocity)
+                // sizeFactor 1.0 -> 0.7/0.3, sizeFactor 3.0 -> 0.9/0.1
+                float smoothing = Math.Clamp(0.6f + (sizeFactor * 0.1f), 0.7f, 0.9f);
+                float newWeight = 1f - smoothing;
 
-            float elapsed = missedFrames + 1f;
-            float newVelX = (newTarget.ScreenCenterX - _fT07.ScreenCenterX) / elapsed;
-            float newVelY = (newTarget.ScreenCenterY - _fT07.ScreenCenterY) / elapsed;
-
-            float newAccelX = newVelX - _fVX09;
-            float newAccelY = newVelY - _fVY0A;
-
-            float predX = _fT07.ScreenCenterX + _fVX09 * elapsed + 0.5f * _fAX0B * elapsed * elapsed;
-            float predY = _fT07.ScreenCenterY + _fVY0A * elapsed + 0.5f * _fAY0C * elapsed * elapsed;
-            float predErrorSq = _mG0D(newTarget.ScreenCenterX, newTarget.ScreenCenterY, predX, predY);
-            float errorNorm = predErrorSq / Math.Max(MathF.Sqrt(_fT07.Rectangle.Width * _fT07.Rectangle.Height), 10f);
-
-            float baseSmoothing = Math.Clamp(0.6f + (sizeFactor * 0.1f), 0.7f, 0.9f);
-            float smoothingVel = errorNorm > 16f ? 0.3f : errorNorm > 4f ? 0.5f : baseSmoothing;
-            float smoothingAccel = smoothingVel * 0.8f;
-
-            _fVX09 = _fVX09 * smoothingVel + newVelX * (1f - smoothingVel);
-            _fVY0A = _fVY0A * smoothingVel + newVelY * (1f - smoothingVel);
-            _fAX0B = _fAX0B * smoothingAccel + newAccelX * (1f - smoothingAccel);
-            _fAY0C = _fAY0C * smoothingAccel + newAccelY * (1f - smoothingAccel);
+                float newVelX = newTarget.ScreenCenterX - _currentTarget.ScreenCenterX;
+                float newVelY = newTarget.ScreenCenterY - _currentTarget.ScreenCenterY;
+                _lastTargetVelocityX = _lastTargetVelocityX * smoothing + newVelX * newWeight;
+                _lastTargetVelocityY = _lastTargetVelocityY * smoothing + newVelY * newWeight;
+            }
         }
 
-        private void _mX10()
+        private void ResetStickyAimState()
         {
-            _fT07 = null;
-            _fW08 = 0;
-            _fA0E = 0;
-            _fVX09 = 0f;
-            _fVY0A = 0f;
-            _fAX0B = 0f;
-            _fAY0C = 0f;
+            _currentTarget = null;
+            _consecutiveFramesWithoutTarget = 0;
+            _framesWithoutMatch = 0;
+            _lastTargetVelocityX = 0f;
+            _lastTargetVelocityY = 0f;
+            _targetLockScore = 0f;
         }
 
-        private void _mU11(Prediction target, Rectangle detectionBox)
+        private void UpdateDetectionBox(Prediction target, Rectangle detectionBox)
         {
             float translatedXMin = target.Rectangle.X + detectionBox.Left;
             float translatedYMin = target.Rectangle.Y + detectionBox.Top;
-            _fD05x = new(translatedXMin, translatedYMin,
+            LastDetectionBox = new(translatedXMin, translatedYMin,
                 target.Rectangle.Width, target.Rectangle.Height);
+
+            CenterXTranslated = target.CenterXTranslated;
+            CenterYTranslated = target.CenterYTranslated;
         }
-        private List<Prediction> _mK12(
+        // is it really kdtreedata though....
+        private List<Prediction> PrepareKDTreeData(
             Tensor<float> outputTensor,
             Rectangle detectionBox,
             float fovMinX, float fovMaxX, float fovMinY, float fovMaxY)
         {
-            uint _jv = unchecked((uint)((int)fovMinX ^ (int)fovMaxY)) & 0u; _ = _jv;
-            float minConfidence = _fA2D;
-            int selectedClassId = _fT36;
+            float minConfidence = (float)Dictionary.sliderSettings["AI Minimum Confidence"] / 100.0f;
+            string selectedClass = Dictionary.dropdownState["Target Class"];
+            int selectedClassId = selectedClass == "Best Confidence" ? -1 : _modelClasses.FirstOrDefault(c => c.Value == selectedClass).Key;
 
-            int nd = _fND03;
-            int imageSize = IMAGE_SIZE;
-            float invImageSize = 1.0f / imageSize;
-            float fovCenterX = imageSize * 0.5f;
-            float fovCenterY = imageSize * 0.5f;
-            float fovRadius = (fovMaxX - fovMinX) * 0.5f;
-            float fovRadiusSq = fovRadius * fovRadius;
-            _fK16.Clear();
-            var KDpredictions = _fK16;
+            // we dont use kdpoints anymore because we replaced the kd-tree with a linear search
+            //var KDpoints = new List<double[]>(NUM_DETECTIONS); // Pre-allocate with estimated capacity
+            var KDpredictions = new List<Prediction>(NUM_DETECTIONS);
 
-            if (outputTensor is DenseTensor<float> dense)
-            {
-                ReadOnlySpan<float> span = dense.Buffer.Span;
-
-                int xOff = 0;
-                int yOff = nd;
-                int wOff = 2 * nd;
-                int hOff = 3 * nd;
-                int clsOff = 4 * nd;
-                int numClasses = _fNC05;
-
-                for (int i = 0; i < nd; i++)
-                {
-                    int bestClassId = 0;
-                    float bestConfidence;
-
-                    if (numClasses == 1)
-                    {
-                        bestConfidence = span[clsOff + i];
-                    }
-                    else if (selectedClassId == -1)
-                    {
-                        bestConfidence = 0f;
-                        int baseIdx = clsOff + i;
-                        for (int classId = 0; classId < numClasses; classId++)
-                        {
-                            float classConfidence = span[baseIdx + classId * nd];
-                            if (classConfidence > bestConfidence)
-                            {
-                                bestConfidence = classConfidence;
-                                bestClassId = classId;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        bestConfidence = span[clsOff + selectedClassId * nd + i];
-                        bestClassId = selectedClassId;
-                    }
-
-                    if (bestConfidence <= minConfidence) continue;
-
-                    float x_center = span[xOff + i];
-                    float y_center = span[yOff + i];
-                    float width = span[wOff + i];
-                    float height = span[hOff + i];
-
-                    if (width <= 0 || height <= 0 || width > imageSize || height > imageSize) continue;
-
-                    float halfW = width * 0.5f;
-                    float halfH = height * 0.5f;
-                    float x_min = x_center - halfW;
-                    float y_min = y_center - halfH;
-                    float x_max = x_center + halfW;
-                    float y_max = y_center + halfH;
-
-                    if (x_min < 0 || y_min < 0 || x_max > imageSize || y_max > imageSize) continue;
-
-                    float fdx = x_center - fovCenterX;
-                    float fdy = y_center - fovCenterY;
-                    if (fdx * fdx + fdy * fdy > fovRadiusSq) continue;
-
-                    KDpredictions.Add(new Prediction
-                    {
-                        Rectangle = new RectangleF(x_min, y_min, width, height),
-                        Confidence = bestConfidence,
-                        ClassId = bestClassId,
-                        ClassName = _fC03.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                        CenterXTranslated = x_center * invImageSize,
-                        CenterYTranslated = y_center * invImageSize,
-                        ScreenCenterX = detectionBox.Left + x_center,
-                        ScreenCenterY = detectionBox.Top + y_center
-                    });
-                }
-
-                _mA13(KDpredictions, 0.45f);
-                return KDpredictions;
-            }
-
-            for (int i = 0; i < nd; i++)
+            for (int i = 0; i < NUM_DETECTIONS; i++)
             {
                 float x_center = outputTensor[0, 0, i];
                 float y_center = outputTensor[0, 1, i];
@@ -1187,78 +1234,58 @@ namespace Venkatesh2.AILogic
                 int bestClassId = 0;
                 float bestConfidence = 0f;
 
-                if (_fNC05 == 1)
+                if (NUM_CLASSES == 1)
                 {
                     bestConfidence = outputTensor[0, 4, i];
                 }
-                else if (selectedClassId == -1)
-                {
-                    for (int classId = 0; classId < _fNC05; classId++)
-                    {
-                        float classConfidence = outputTensor[0, 4 + classId, i];
-                        if (classConfidence > bestConfidence)
-                        {
-                            bestConfidence = classConfidence;
-                            bestClassId = classId;
-                        }
-                    }
-                }
                 else
                 {
-                    bestConfidence = outputTensor[0, 4 + selectedClassId, i];
-                    bestClassId = selectedClassId;
+                    if (selectedClassId == -1)
+                    {
+                        for (int classId = 0; classId < NUM_CLASSES; classId++)
+                        {
+                            float classConfidence = outputTensor[0, 4 + classId, i];
+                            if (classConfidence > bestConfidence)
+                            {
+                                bestConfidence = classConfidence;
+                                bestClassId = classId;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        bestConfidence = outputTensor[0, 4 + selectedClassId, i];
+                        bestClassId = selectedClassId;
+                    }
                 }
 
-                if (bestConfidence <= minConfidence) continue;
-
-                if (width <= 0 || height <= 0 || width > imageSize || height > imageSize) continue;
+                if (bestConfidence < minConfidence) continue;
 
                 float x_min = x_center - width / 2;
                 float y_min = y_center - height / 2;
                 float x_max = x_center + width / 2;
                 float y_max = y_center + height / 2;
 
-                if (x_min < 0 || y_min < 0 || x_max > imageSize || y_max > imageSize) continue;
+                if (x_min < fovMinX || x_max > fovMaxX || y_min < fovMinY || y_max > fovMaxY) continue;
 
+                RectangleF rect = new(x_min, y_min, width, height);
+                Prediction prediction = new()
                 {
-                    float fdx = x_center - fovCenterX;
-                    float fdy = y_center - fovCenterY;
-                    if (fdx * fdx + fdy * fdy > fovRadiusSq) continue;
-                }
-
-                KDpredictions.Add(new Prediction
-                {
-                    Rectangle = new RectangleF(x_min, y_min, width, height),
+                    Rectangle = rect,
                     Confidence = bestConfidence,
                     ClassId = bestClassId,
-                    ClassName = _fC03.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
-                    CenterXTranslated = x_center * invImageSize,
-                    CenterYTranslated = y_center * invImageSize,
+                    ClassName = _modelClasses.GetValueOrDefault(bestClassId, $"Class_{bestClassId}"),
+                    CenterXTranslated = x_center / IMAGE_SIZE,
+                    CenterYTranslated = y_center / IMAGE_SIZE,
                     ScreenCenterX = detectionBox.Left + x_center,
                     ScreenCenterY = detectionBox.Top + y_center
-                });
+                };
+
+                //KDpoints.Add(new double[] { x_center, y_center });
+                KDpredictions.Add(prediction);
             }
 
-            _mA13(KDpredictions, 0.45f);
             return KDpredictions;
-        }
-
-        private static void _mA13(List<Prediction> predictions, float iouThreshold)
-        {
-            if (predictions.Count <= 1) return;
-
-            predictions.Sort((a, b) => b.Confidence.CompareTo(a.Confidence));
-
-            for (int i = 0; i < predictions.Count; i++)
-            {
-                var kept = predictions[i];
-                for (int j = predictions.Count - 1; j > i; j--)
-                {
-                    float iou = _mI0D(kept.Rectangle, predictions[j].Rectangle);
-                    if (iou > iouThreshold)
-                        predictions.RemoveAt(j);
-                }
-            }
         }
 
         #endregion AI Loop Functions
@@ -1267,29 +1294,35 @@ namespace Venkatesh2.AILogic
 
         #region Screen Capture
 
-        private void _mS14(Bitmap? frame, Prediction? DoLabel = null)
+        private void SaveFrame(Bitmap frame, Prediction? DoLabel = null)
         {
-            if (!_fA29) return;
-            if (frame == null) return;
-            if (_fA25 && !Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c32])) return;
+            // Only save frames if "Collect Data While Playing" is enabled
+            if (!Dictionary.toggleState["Collect Data While Playing"]) return;
 
-            long now = Environment.TickCount64;
-            if (now - _fS04 < _fK18) return;
+            // Skip if we're in constant tracking mode (unless auto-labeling is enabled)
+            if (Dictionary.toggleState["Constant AI Tracking"] && !Dictionary.toggleState["Auto Label Data"]) return;
+
+            // Cooldown check
+            if ((DateTime.Now - lastSavedTime).TotalMilliseconds < SAVE_FRAME_COOLDOWN_MS) return;
 
             try
             {
+                // Validate bitmap is still usable
+                if (frame == null) return;
 
+                // Accessing Width/Height will throw if bitmap is disposed
                 int width = frame.Width;
                 int height = frame.Height;
                 if (width <= 0 || height <= 0) return;
 
-                _fS04 = now;
+                lastSavedTime = DateTime.Now;
                 string uuid = Guid.NewGuid().ToString();
                 string imagePath = Path.Combine("bin", "images", $"{uuid}.jpg");
 
+                // Save synchronously to avoid "Object is currently in use elsewhere" error
                 frame.Save(imagePath, ImageFormat.Jpeg);
 
-                if (Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c32]) && DoLabel != null)
+                if (Dictionary.toggleState["Auto Label Data"] && DoLabel != null)
                 {
                     var labelPath = Path.Combine("bin", "labels", $"{uuid}.txt");
 
@@ -1303,10 +1336,11 @@ namespace Venkatesh2.AILogic
             }
             catch (ArgumentException)
             {
+                // Bitmap was disposed or invalid - silently ignore
             }
             catch (Exception ex)
             {
-                Log(LogLevel.Error, $"_mS14 failed: {ex.Message}");
+                Log(LogLevel.Error, $"SaveFrame failed: {ex.Message}");
             }
         }
 
@@ -1316,20 +1350,35 @@ namespace Venkatesh2.AILogic
 
         public void Dispose()
         {
-            _fC0F?.Cancel();
+            // Signal that we're shutting down
+            lock (_sizeLock)
+            {
+                _sizeChangePending = true;
+            }
 
-            try { _fT10?.Wait(TimeSpan.FromSeconds(2)); } catch { }
+            // Stop the loop
+            _isAiLoopRunning = false;
+            if (_aiLoopThread != null && _aiLoopThread.IsAlive)
+            {
+                if (!_aiLoopThread.Join(TimeSpan.FromSeconds(1)))
+                {
+                    try { _aiLoopThread.Interrupt(); }
+                    catch { }
+                }
+            }
 
-            _fC0F?.Dispose();
-            _fC0F = null;
+            // Print final benchmarks
+            PrintBenchmarks();
 
-            _fP3B.Dispose();
+            // Dispose DXGI objects
+            _captureManager.Dispose();
 
-            _fR14 = null;
-            _fR15 = null;
-            _fX0C?.Dispose();
-            _fX0C = null;
-            _fO0D?.Dispose();
+            // Clean up other resources
+            _reusableInputArray = null;
+            _reusableInputs = null;
+            _onnxModel?.Dispose();
+            _modeloptions?.Dispose();
+            _bitmapBuffer = null;
         }
     }
     public class Prediction
@@ -1340,7 +1389,7 @@ namespace Venkatesh2.AILogic
         public string ClassName { get; set; } = "Enemy";
         public float CenterXTranslated { get; set; }
         public float CenterYTranslated { get; set; }
-        public float ScreenCenterX { get; set; }
+        public float ScreenCenterX { get; set; }  // Absolute screen position
         public float ScreenCenterY { get; set; }
     }
 }

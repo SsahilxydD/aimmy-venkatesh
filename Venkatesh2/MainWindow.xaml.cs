@@ -4,7 +4,7 @@ using Venkatesh2.MouseMovementLibraries.GHubSupport;
 using Venkatesh2.Other;
 using Venkatesh2.Theme;
 using Venkatesh2.UILibrary;
-using VenkateshWPF.Class;
+using AimmyWPF.Class;
 using Class;
 using InputLogic;
 using Other;
@@ -96,7 +96,7 @@ namespace Venkatesh2
                 LoadInitialMenu();
 
                 // Continue with the rest of initialization
-                InitializeApplicationAsync();
+                await InitializeApplicationAsync();
                 UpdateAboutSpecs();
                 ApplyThemeGradients();
                 ThemeManager.LoadMediaSettings();
@@ -132,7 +132,7 @@ namespace Venkatesh2
             _currentMenu = "AimMenu";
         }
 
-        private void InitializeApplicationAsync()
+        private async Task InitializeApplicationAsync()
         {
             CheckRunningFromTemp();
 
@@ -155,7 +155,7 @@ namespace Venkatesh2
 
         private void OnDisplayChanged(object? sender, DisplayChangedEventArgs e)
         {
-            MouseManager.RefreshScreenDimensions();
+
             // Force update all windows to new display
             DisplayManager.ForceUpdateWindows();
         }
@@ -165,9 +165,9 @@ namespace Venkatesh2
             if (Directory.GetCurrentDirectory().Contains("Temp"))
             {
                 MessageBox.Show(
-                    "Hi, it is made aware that you are running Venkatesh without extracting it from the zip file. " +
-                    "Please extract Venkatesh from the zip file or Venkatesh will not be able to run properly.\n\nThank you.",
-                    "Venkatesh V2");
+                    "Hi, it is made aware that you are running Aimmy without extracting it from the zip file. " +
+                    "Please extract Aimmy from the zip file or Aimmy will not be able to run properly.\n\nThank you.",
+                    "Aimmy V2");
             }
         }
 
@@ -243,7 +243,7 @@ namespace Venkatesh2
                     {
                         ThemeManager.SetThemeColor(colorString);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
                     }
                 }
@@ -344,7 +344,7 @@ namespace Venkatesh2
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }
@@ -363,7 +363,7 @@ namespace Venkatesh2
                 {
                     var fm = _fileManager.Value;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                 }
             }
@@ -425,7 +425,7 @@ namespace Venkatesh2
             if (Dictionary.dropdownState.TryGetValue("Mouse Movement Method", out var method) &&
                 method?.ToString() == "LG HUB")
             {
-                _xA3F1._mCl02();
+                LGMouse.Close();
             }
         }
 
@@ -509,7 +509,7 @@ namespace Venkatesh2
                         break;
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }
@@ -555,7 +555,7 @@ namespace Venkatesh2
                 await SwitchToMenu(newMenuName);
                 _currentMenu = newMenuName;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
             finally
@@ -613,6 +613,10 @@ namespace Venkatesh2
                 ["StreamGuard"] = () =>
                 {
                     StreamGuardManager.ApplyStreamGuardToAllWindows(Dictionary.toggleState[title]);
+                },
+                ["EMA Smoothening"] = () =>
+                {
+                    MouseManager.IsEMASmoothingEnabled = Dictionary.toggleState[title];
                 },
                 ["X Axis Percentage Adjustment"] = () => UpdateSliderVisibility(uiManager),
                 ["Y Axis Percentage Adjustment"] = () => UpdateSliderVisibility(uiManager)
@@ -761,7 +765,17 @@ namespace Venkatesh2
             Dictionary.sliderSettings["FOV Size"] = targetSize;
             AnimateFOVSize(targetSize);
         }
+        /* Old
+        private void ApplyDynamicFOV(bool apply)
+        {
+            if (!Dictionary.toggleState["Dynamic FOV"]) return;
 
+            var targetSize = apply ? Convert.ToDouble(Dictionary.sliderSettings["Dynamic FOV Size"]) : ActualFOV;
+            Dictionary.sliderSettings["FOV Size"] = targetSize;
+
+            AnimateFOVSize(targetSize);
+        }
+        */
         private void AnimateFOVSize(double targetSize)
         {
             var duration = TimeSpan.FromMilliseconds(500);
@@ -770,17 +784,24 @@ namespace Venkatesh2
             Animator.WidthShift(duration, FOVWindow.RectangleShape, FOVWindow.RectangleShape.ActualWidth, targetSize);
             Animator.HeightShift(duration, FOVWindow.RectangleShape, FOVWindow.RectangleShape.ActualHeight, targetSize);
         }
-
+        /* Old
+        private void AnimateFOVSize(double targetSize)
+        {
+            var duration = TimeSpan.FromMilliseconds(500);
+            Animator.WidthShift(duration, FOVWindow.Circle, FOVWindow.Circle.ActualWidth, targetSize);
+            Animator.HeightShift(duration, FOVWindow.Circle, FOVWindow.Circle.ActualHeight, targetSize);
+        }
+        */
         private void HandleEmergencyStop()
         {
-            var features = new[] { "Aim Assist", "Constant AI Tracking" };
-            var toggles = new[] { uiManager.T_AimAligner, uiManager.T_ConstantAITracking };
+            var features = new[] { "Aim Assist", "Constant AI Tracking", "Auto Trigger" };
+            var toggles = new[] { uiManager.T_AimAligner, uiManager.T_ConstantAITracking, uiManager.T_AutoTrigger };
 
             for (int i = 0; i < features.Length; i++)
             {
                 Dictionary.toggleState[features[i]] = false;
                 if (toggles[i] != null)
-                    UpdateToggleUI(toggles[i]!, false);
+                    UpdateToggleUI(toggles[i], false);
             }
             LogManager.Log(LogManager.LogLevel.Info, "[Emergency Stop Keybind] Disabled all AI features.", true);
         }
@@ -789,18 +810,9 @@ namespace Venkatesh2
 
         #region UI Effects
 
-        // Throttle background gradient updates — MouseMove can fire 500+ Hz on gaming mice
-        // and each update re-renders the full window background brush.
-        private long _lastGradientTick;
-        private const int GRADIENT_UPDATE_INTERVAL_MS = 33; // ~30Hz
-
         private void Main_Background_Gradient(object sender, MouseEventArgs e)
         {
             if (!Dictionary.toggleState["Mouse Background Effect"]) return;
-
-            long now = Environment.TickCount64;
-            if (now - _lastGradientTick < GRADIENT_UPDATE_INTERVAL_MS) return;
-            _lastGradientTick = now;
 
             var mousePosition = WinAPICaller.GetCursorPosition();
             var translatedMousePos = PointFromScreen(new Point(mousePosition.X, mousePosition.Y));
@@ -837,6 +849,12 @@ namespace Venkatesh2
             var dropdownConfigs = new[]
             {
                 // AimMenu dropdowns
+                (uiManager.D_PredictionMethod, "Prediction Method", new Dictionary<string, int>
+                {
+                    ["Kalman Filter"] = 0,
+                    ["Shall0e's Prediction"] = 1,
+                    ["wisethef0x's EMA Prediction"] = 2
+                }),
                 (uiManager.D_DetectionAreaType, "Detection Area Type", new Dictionary<string, int>
                 {
                     ["Closest to Center Screen"] = 0,
@@ -896,6 +914,7 @@ namespace Venkatesh2
             }
 
             // Update slider visibility based on loaded states
+            UpdatePredictionSliderVisibility();
             UpdateAimAssistSliderVisibility();
             UpdateAimConfigSliderVisibility();
         }
@@ -929,7 +948,7 @@ namespace Venkatesh2
                 {
                     MessageBox.Show(
                         $"The creator of this model suggests you use this model:\n{suggestedModel}",
-                        "Suggested Model - Venkatesh");
+                        "Suggested Model - Aimmy");
                 }
             }
         }
@@ -940,12 +959,18 @@ namespace Venkatesh2
             {
                 ("FOV Size", uiManager.S_FOVSize, 640.0),
                 ("Mouse Sensitivity (+/-)", uiManager.S_MouseSensitivity, 0.8),
+                ("Mouse Jitter", uiManager.S_MouseJitter, 0.0),
                 ("Sticky Aim Threshold", uiManager.S_StickyAimThreshold, 50),
+                ("EMA Smoothening", uiManager.S_EMASmoothing, 0.5),
                 ("Y Offset (Up/Down)", uiManager.S_YOffset, 0.0),
                 ("X Offset (Left/Right)", uiManager.S_XOffset, 0.0),
                 ("Y Offset (%)", uiManager.S_YOffsetPercent, 0.0),
                 ("X Offset (%)", uiManager.S_XOffsetPercent, 0.0),
-                ("AI Minimum Confidence", uiManager.S_AIMinimumConfidence, 50.0)
+                ("Auto Trigger Delay", uiManager.S_AutoTriggerDelay, 0.25),
+                ("AI Minimum Confidence", uiManager.S_AIMinimumConfidence, 50.0),
+                ("Kalman Lead Time", uiManager.S_KalmanLeadTime, 0.10),
+                ("WiseTheFox Lead Time", uiManager.S_WiseTheFoxLeadTime, 0.15),
+                ("Shalloe Lead Multiplier", uiManager.S_ShalloeLeadMultiplier, 3.0)
             };
 
             ApplySliderValues(sliderConfigs, Dictionary.sliderSettings);
@@ -956,6 +981,14 @@ namespace Venkatesh2
         {
             var dropdownConfigs = new[]
             {
+
+                ("Prediction Method", uiManager.D_PredictionMethod, new Dictionary<string, int>
+                {
+                    ["Kalman Filter"] = 0,
+                    ["Shall0e's Prediction"] = 1,
+                    ["wisethef0x's EMA Prediction"] = 2
+                }),
+
                 ("Detection Area Type", uiManager.D_DetectionAreaType, new Dictionary<string, int>
                 {
                     ["Closest to Center Screen"] = 0,
@@ -1001,6 +1034,45 @@ namespace Venkatesh2
             };
 
             ApplyDropdownValues(dropdownConfigs, Dictionary.dropdownState);
+
+            // Update prediction slider visibility based on selected method
+            UpdatePredictionSliderVisibility();
+        }
+
+        public void UpdatePredictionSliderVisibility()
+        {
+            // Hide all prediction sliders first
+            if (uiManager.S_KalmanLeadTime != null)
+                uiManager.S_KalmanLeadTime.Visibility = Visibility.Collapsed;
+            if (uiManager.S_WiseTheFoxLeadTime != null)
+                uiManager.S_WiseTheFoxLeadTime.Visibility = Visibility.Collapsed;
+            if (uiManager.S_ShalloeLeadMultiplier != null)
+                uiManager.S_ShalloeLeadMultiplier.Visibility = Visibility.Collapsed;
+
+            // Don't show sliders if Predictions section is collapsed
+            if (Dictionary.minimizeState.TryGetValue("Predictions", out var collapsed) && collapsed == true)
+                return;
+
+            // Get selected method from actual dropdown selection
+            var selectedItem = uiManager.D_PredictionMethod?.DropdownBox?.SelectedItem as ComboBoxItem;
+            string selectedMethod = selectedItem?.Content?.ToString() ?? "";
+
+            // Show only the relevant slider based on selected method
+            switch (selectedMethod)
+            {
+                case "Kalman Filter":
+                    if (uiManager.S_KalmanLeadTime != null)
+                        uiManager.S_KalmanLeadTime.Visibility = Visibility.Visible;
+                    break;
+                case "Shall0e's Prediction":
+                    if (uiManager.S_ShalloeLeadMultiplier != null)
+                        uiManager.S_ShalloeLeadMultiplier.Visibility = Visibility.Visible;
+                    break;
+                case "wisethef0x's EMA Prediction":
+                    if (uiManager.S_WiseTheFoxLeadTime != null)
+                        uiManager.S_WiseTheFoxLeadTime.Visibility = Visibility.Visible;
+                    break;
+            }
         }
 
         public void UpdateAimAssistSliderVisibility()

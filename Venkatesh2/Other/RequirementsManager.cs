@@ -49,7 +49,7 @@ namespace Other
                     return false;
                 }
 
-                string? ghubfilepath = process.MainModule?.FileName;
+                string ghubfilepath = process.MainModule.FileName;
                 if (ghubfilepath == null)
                 {
                     LogManager.Log(LogManager.LogLevel.Error, "An error occurred. Run as admin and try again.", true);
@@ -58,7 +58,7 @@ namespace Other
 
                 FileVersionInfo versionInfo = FileVersionInfo.GetVersionInfo(ghubfilepath);
 
-                if (versionInfo.ProductVersion == null || !versionInfo.ProductVersion.Contains("2021"))
+                if (!versionInfo.ProductVersion.Contains("2021"))
                 {
                     ShowLGHubImproperInstallMessage();
                     return false;
@@ -75,9 +75,9 @@ namespace Other
 
         private static void ShowLGHubNotRunningMessage()
         {
-            if (MessageBox.Show("LG HUB is not running, is it installed?", "Venkatesh - LG HUB Mouse Movement", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.No)
+            if (MessageBox.Show("LG HUB is not running, is it installed?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.No)
             {
-                if (MessageBox.Show("Would you like to install it?", "Venkatesh - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                if (MessageBox.Show("Would you like to install it?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
                     new LGDownloader().Show();
                 }
@@ -86,7 +86,7 @@ namespace Other
 
         private static void ShowLGHubImproperInstallMessage()
         {
-            if (MessageBox.Show("LG HUB install is improper, would you like to install it?", "Venkatesh - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+            if (MessageBox.Show("LG HUB install is improper, would you like to install it?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
             {
                 new LGDownloader().Show();
             }

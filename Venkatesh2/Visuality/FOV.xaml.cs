@@ -104,7 +104,7 @@ namespace Visuality
                 this.UpdateLayout();
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
             }
         }

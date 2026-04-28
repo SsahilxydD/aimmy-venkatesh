@@ -1,59 +1,60 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace MouseMovementLibraries.SendInputSupport
 {
-    internal class _xF834
+    internal class SendInputMouse
     {
-        [DllImport("user32.dll", EntryPoint = "SendInput")]
-        private static extern void _nSi(int _a, _sI[] _b, int _c);
+        // Admittedly written by ChatGPT, I accidentially had ChatGPT cook this up while asking it to rewrite some
+        // python script someone sent me over "Raw Input Manipulation" (never heard of it) and it came up with a SendInput Class
+        // I know I know, it's similar to Mouse Event, but I decided to add it anyways :shrug:
+
+        // Nori
+
+        [DllImport("user32.dll")]
+        private static extern void SendInput(int nInputs, INPUT[] pInputs, int cbSize);
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct _sI { public int _t; public _uI _u; }
-
-        [StructLayout(LayoutKind.Explicit)]
-        private struct _uI { [FieldOffset(0)] public _sM _m; }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct _sM { public int _dx; public int _dy; public uint _md; public uint _fl; public uint _tm; public IntPtr _ei; }
-
-        private static bool _opP()
+        private struct INPUT
         {
-            int _t = Environment.TickCount;
-            return (_t | (~_t)) == -1;
+            public int type;
+            public InputUnion U;
         }
 
-        public static void _mSc0F(uint _mc, int _x = 0, int _y = 0)
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
         {
-            bool _op = _opP();
-            // Junk bitwise computation — result discarded
-            uint _jk = unchecked((uint)Environment.TickCount);
-            _jk = ((_jk << 7) | (_jk >> 25)) ^ 0x5A3C7F2Bu;
-            _ = _jk & 0u;
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+        }
 
-            int _st = 0;
-            _sI _in = default;
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
 
-            while (_op)
+        public static void SendMouseCommand(uint MouseCommand, int x = 0, int y = 0)
+        {
+            INPUT input = new INPUT
             {
-                switch (_st)
+                type = 0,
+                U = new InputUnion
                 {
-                    case 0:
-                        _in = new _sI
-                        {
-                            _t = (int)(_jk & 0u),   // always 0
-                            _u = new _uI { _m = new _sM { _dx = _x, _dy = _y, _fl = _mc } }
-                        };
-                        _st = 1;
-                        break;
-                    case 1:
-                        if (!_op) { _st = 9; break; } // dead branch
-                        _nSi(1, new[] { _in }, Marshal.SizeOf(typeof(_sI)));
-                        _st = 9;
-                        break;
-                    case 9:
-                        return;
+                    mi = new MOUSEINPUT
+                    {
+                        dx = x,
+                        dy = y,
+                        dwFlags = MouseCommand
+                    }
                 }
-            }
+            };
+
+            SendInput(1, [input], Marshal.SizeOf(typeof(INPUT)));
         }
     }
 }
