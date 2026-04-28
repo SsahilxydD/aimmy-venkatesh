@@ -23,21 +23,11 @@ namespace InputLogic
 
         private static readonly uint _eMV = (uint)(0x1);
 
-        private static double _spX = 0.0;
-        private static double _spY = 0.0;
-
+        private static double _pX = 0;
+        private static double _pY = 0;
 
         [DllImport("user32.dll", EntryPoint = "mouse_event")]
         private static extern void _mEv(uint _a, uint _b, uint _c, uint _d, int _e);
-
-        private static readonly Random _rng = new();
-
-        private static double _gauss(double _sg)
-        {
-            double _u1 = 1.0 - _rng.NextDouble();
-            double _u2 = 1.0 - _rng.NextDouble();
-            return _sg * Math.Sqrt(-2.0 * Math.Log(_u1)) * Math.Cos(2.0 * Math.PI * _u2);
-        }
 
         private static bool _opP()
         {
@@ -85,15 +75,13 @@ namespace InputLogic
             bool _op = _opP();
             uint _jv2 = unchecked((uint)(_dX * 0 ^ _dY * 0)); _ = _jv2;
 
-            double _tX = _dX - _sW / 2.0;
-            double _tY = _dY - _sW / 2.0;
+            int _tX = _dX - (int)_sW / 2;
+            int _tY = _dY - (int)_sH / 2;
 
-            double _jS = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c21]);
-            double _jX = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
-            double _jY = _jS > 0 ? _gauss(_jS * 0.45 + _rng.NextDouble() * 0.1) : 0;
+            double _ar = _sW / _sH;
 
             Point _s = new(0, 0);
-            Point _e = new((int)_tX, (int)_tY);
+            Point _e = new(_tX, _tY);
             Point _nP = new(0, 0);
 
             string _mp = Convert.ToString(Dictionary.dropdownState[_xB9D2._c22]) ?? _xB9D2._c23;
@@ -119,10 +107,8 @@ namespace InputLogic
                         break;
 
                     case 1:
-                        int _pxOff = -(_e.Y - _s.Y) / 4;
-                        int _pyOff =  (_e.X - _s.X) / 4;
-                        Point _c1 = new(_s.X + (_e.X - _s.X) / 3 + _pxOff, _s.Y + (_e.Y - _s.Y) / 3 + _pyOff);
-                        Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3 - _pxOff, _s.Y + 2 * (_e.Y - _s.Y) / 3 - _pyOff);
+                        Point _c1 = new(_s.X + (_e.X - _s.X) / 3, _s.Y + (_e.Y - _s.Y) / 3);
+                        Point _c2 = new(_s.X + 2 * (_e.X - _s.X) / 3, _s.Y + 2 * (_e.Y - _s.Y) / 3);
                         _nP = MovementPaths._mB03(_s, _e, _c1, _c2, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]));
                         _st = 11; break;
 
@@ -131,7 +117,7 @@ namespace InputLogic
                         _st = 11; break;
 
                     case 3:
-                        _nP = MovementPaths._mE05(_s, _e, 1.0 - Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]), 3.0);
+                        _nP = MovementPaths._mE05(_s, _e, 1.0 - (Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c2A]) - 0.2), 3.0);
                         _st = 11; break;
 
                     case 4:
@@ -151,25 +137,16 @@ namespace InputLogic
                         _st = 11; break;
 
                     case 11:
-                        int _cB = 147 + _rng.Next(0, 6);
-                        _nP.X = Math.Clamp(_nP.X, -_cB, _cB);
-                        _nP.Y = Math.Clamp(_nP.Y, -_cB, _cB);
+                        _nP.X = Math.Clamp(_nP.X, -150, 150);
+                        _nP.Y = Math.Clamp(_nP.Y, -150, 150);
+                        _nP.Y = (int)(_nP.Y / _ar);
                         _st = 12; break;
 
                     case 12:
-                        _spX += _nP.X + _jX;
-                        _spY += _nP.Y + _jY;
-                        int _sendX = (int)_spX;
-                        int _sendY = (int)_spY;
-                        _spX -= _sendX;
-                        _spY -= _sendY;
-
-                        if (_sendX == 0 && _sendY == 0) { _st = 99; break; }
-
-                        if (_jS > 0 && _rng.Next(0, 4) == 0) _sendX += _rng.Next(-1, 2);
-                        if (_jS > 0 && _rng.Next(0, 4) == 0) _sendY += _rng.Next(-1, 2);
-
-                        _dispatchMove(_sendX, _sendY);
+                        if (_nP.X == 0 && _nP.Y == 0) { _st = 99; break; }
+                        _dispatchMove(_nP.X, _nP.Y);
+                        _pX = _nP.X;
+                        _pY = _nP.Y;
                         _st = 99; break;
 
                     case 99:

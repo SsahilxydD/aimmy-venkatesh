@@ -86,7 +86,7 @@ namespace Venkatesh2.AILogic
         private static int _fTX, _fTY;
 
         private float _scaleX => ScreenWidth / (float)IMAGE_SIZE;
-        private float _scaleY => ScreenWidth / (float)IMAGE_SIZE;
+        private float _scaleY => ScreenHeight / (float)IMAGE_SIZE;
 
         private DenseTensor<float>? _fR13;
         private float[]? _fR14;
@@ -110,6 +110,7 @@ namespace Venkatesh2.AILogic
         private double _fA2E;
         private double _fA2F;
         private double _fA30;
+        private double _fA31;
         private double _fA32;
         private string _fA33 = _xB9D2._c17;
         private System.Drawing.Point _fA34;
@@ -133,6 +134,7 @@ namespace Venkatesh2.AILogic
             _fA2E             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0B]);
             _fA2F             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0C]);
             _fA30          = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0D]);
+            _fA31          = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0E]);
             _fA32     = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0F]);
             _fA33     = Convert.ToString(Dictionary.dropdownState[_xB9D2._c10]) ?? _xB9D2._c17;
             _fA2B      = Convert.ToString(Dictionary.dropdownState[_xB9D2._c11]) == _xB9D2._c12;
@@ -643,7 +645,7 @@ namespace Venkatesh2.AILogic
             var rect = closestPrediction.Rectangle;
 
             _fDX = _fA27
-                ? (int)(rect.X * scaleX)
+                ? (int)((rect.X + rect.Width * (_fA31 / 100)) * scaleX)
                 : (int)((rect.X + rect.Width / 2) * scaleX + _fA2F);
 
             _fDY = _fA28
@@ -1136,12 +1138,14 @@ namespace Venkatesh2.AILogic
                         bestClassId = selectedClassId;
                     }
 
-                    if (bestConfidence < minConfidence) continue;
+                    if (bestConfidence <= minConfidence) continue;
 
                     float x_center = span[xOff + i];
                     float y_center = span[yOff + i];
                     float width = span[wOff + i];
                     float height = span[hOff + i];
+
+                    if (width <= 0 || height <= 0 || width > imageSize || height > imageSize) continue;
 
                     float halfW = width * 0.5f;
                     float halfH = height * 0.5f;
@@ -1149,6 +1153,8 @@ namespace Venkatesh2.AILogic
                     float y_min = y_center - halfH;
                     float x_max = x_center + halfW;
                     float y_max = y_center + halfH;
+
+                    if (x_min < 0 || y_min < 0 || x_max > imageSize || y_max > imageSize) continue;
 
                     float fdx = x_center - fovCenterX;
                     float fdy = y_center - fovCenterY;
@@ -1203,12 +1209,16 @@ namespace Venkatesh2.AILogic
                     bestClassId = selectedClassId;
                 }
 
-                if (bestConfidence < minConfidence) continue;
+                if (bestConfidence <= minConfidence) continue;
+
+                if (width <= 0 || height <= 0 || width > imageSize || height > imageSize) continue;
 
                 float x_min = x_center - width / 2;
                 float y_min = y_center - height / 2;
                 float x_max = x_center + width / 2;
                 float y_max = y_center + height / 2;
+
+                if (x_min < 0 || y_min < 0 || x_max > imageSize || y_max > imageSize) continue;
 
                 {
                     float fdx = x_center - fovCenterX;
