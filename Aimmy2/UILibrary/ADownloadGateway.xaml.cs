@@ -26,7 +26,7 @@ namespace Aimmy2.UILibrary
                 SetupHttpClientHeaders();
 
                 var encodedName = Uri.EscapeDataString(Name);
-                var downloadUri = new Uri($"https://github.com/SsahilxydD/aimmy-venkatesh/raw/main/{Path}/{encodedName}");
+                var downloadUri = new Uri($"https://github.com/Babyhamsta/Aimmy/raw/main/{Path}/{encodedName}");
                 var downloadResult = await DownloadFileAsync(downloadUri, Path, Name);
 
                 if (downloadResult)
