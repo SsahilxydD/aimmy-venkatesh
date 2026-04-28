@@ -199,6 +199,8 @@ namespace Venkatesh2.Controls
                     tooltip: "Drags the mouse down while holding the recoil keybind to compensate for weapon recoil.")
                 .AddSlider("Recoil Strength", "Pixels", 1, 1, 0, 100,
                     tooltip: "Pixels per tick to drag down. Higher = stronger pull. 0 = no drag.")
+                .AddSlider("Recoil Tick Rate", "Hz", 10, 10, 10, 500,
+                    tooltip: "How many times per second the drag fires. Higher = smoother but more aggressive total pull. 100 Hz is a sane default.")
                 .AddKeyChanger("Recoil Keybind",
                     tooltip: "The key/button to hold to activate recoil drag. Defaults to LMB.")
                 .AddSeparator();

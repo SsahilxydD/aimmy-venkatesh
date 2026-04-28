@@ -27,6 +27,7 @@ namespace Venkatesh2.Class
             { "Mouse Sensitivity (+/-)", 0.80 },
             { "Mouse Jitter", 0 },
             { "Recoil Strength", 0 },
+            { "Recoil Tick Rate", 100 },
             { "Sticky Aim Threshold", 50 },
             { "Y Offset (Up/Down)", 0 },
             { "Y Offset (%)", 50 },
