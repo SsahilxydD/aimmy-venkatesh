@@ -24,7 +24,7 @@ namespace Venkatesh2.Class
             { "FOV Size", 640 },
             { "Dynamic FOV Size", 200 },
             { "Mouse Sensitivity (+/-)", 0.80 },
-            { "Mouse Jitter", 4 },
+            { "Mouse Jitter", 0 },
             { "Sticky Aim Threshold", 50 },
             { "Y Offset (Up/Down)", 0 },
             { "Y Offset (%)", 50 },
