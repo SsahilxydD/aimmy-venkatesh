@@ -39,7 +39,7 @@ namespace Other
         public async Task CheckForUpdate(string currentVersion)
         {
             GithubManager githubManager = new();
-            var (latestVersion, latestZipUrl) = await githubManager.GetLatestReleaseInfo("Babyhamsta", "Venkatesh");
+            var (latestVersion, latestZipUrl) = await githubManager.GetLatestReleaseInfo("SsahilxydD", "aimmy-venkatesh");
 
             if (string.IsNullOrEmpty(latestVersion) || string.IsNullOrEmpty(latestZipUrl))
             {

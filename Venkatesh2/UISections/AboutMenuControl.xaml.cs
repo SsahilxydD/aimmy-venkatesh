@@ -293,7 +293,7 @@ namespace Venkatesh2.Controls
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "https://github.com/Babyhamsta/Venkatesh",
+                    FileName = "https://github.com/SsahilxydD/aimmy-venkatesh",
                     UseShellExecute = true
                 });
             }
@@ -320,7 +320,7 @@ namespace Venkatesh2.Controls
                 var version = AboutDesc.Content?.ToString()?.TrimStart('v') ?? "2.5.0";
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = $"https://github.com/Babyhamsta/Venkatesh/releases/tag/v{version}",
+                    FileName = $"https://github.com/SsahilxydD/aimmy-venkatesh/releases/tag/v{version}",
                     UseShellExecute = true
                 });
             }
