@@ -243,6 +243,8 @@ namespace Venkatesh2.Controls
                             LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Venkatesh may be too low can cause false positives.", true);
                     };
                 }, tooltip: "How sure the AI must be before targeting. Higher = fewer false detections but may miss targets.")
+                .AddSlider("NMS IOU Threshold", "IOU", 0.05, 0.05, 0.10, 0.90,
+                    tooltip: "How much overlap between detection boxes counts as duplicate. Lower = stricter dedupe, fewer false positives. 0.30 is a good default.")
                 .AddToggle("Enable Model Switch Keybind", t => uiManager.T_EnableModelSwitchKeybind = t,
                     tooltip: "Allow switching between AI models using a hotkey.")
                 .AddKeyChanger("Model Switch Keybind", k => uiManager.C_ModelSwitchKeybind = k,

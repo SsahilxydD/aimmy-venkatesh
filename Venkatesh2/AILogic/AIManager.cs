@@ -107,6 +107,7 @@ namespace Venkatesh2.AILogic
         private bool _fA2B;
         private float _fA2C;
         private float _fA2D;
+        private float _fA2D2;
         private double _fA2E;
         private double _fA2F;
         private double _fA30;
@@ -130,6 +131,7 @@ namespace Venkatesh2.AILogic
             _fA2A          = Convert.ToBoolean(Dictionary.toggleState[_xB9D2._c08]);
             _fA2C             = Convert.ToSingle(Dictionary.sliderSettings[_xB9D2._c09]);
             _fA2D       = Convert.ToSingle(Dictionary.sliderSettings[_xB9D2._c0A]) / 100.0f;
+            _fA2D2      = Convert.ToSingle(Dictionary.sliderSettings["NMS IOU Threshold"]);
             _fA2E             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0B]);
             _fA2F             = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0C]);
             _fA30          = Convert.ToDouble(Dictionary.sliderSettings[_xB9D2._c0D]);
@@ -443,8 +445,8 @@ namespace Venkatesh2.AILogic
             _fA23 ||
             _fA24;
 
-        private const double TARGET_FRAME_MS = 1000.0 / 144.0;
-        private const int IDLE_DELAY_MS = 33;
+        private const double TARGET_FRAME_MS = 1000.0 / 240.0;
+        private const int IDLE_DELAY_MS = 4;
 
         private async Task _mL0C(CancellationToken ct)
         {
@@ -1167,7 +1169,7 @@ namespace Venkatesh2.AILogic
                     });
                 }
 
-                _mA13(KDpredictions, 0.45f);
+                _mA13(KDpredictions, _fA2D2);
                 return KDpredictions;
             }
 
@@ -1229,7 +1231,7 @@ namespace Venkatesh2.AILogic
                 });
             }
 
-            _mA13(KDpredictions, 0.45f);
+            _mA13(KDpredictions, _fA2D2);
             return KDpredictions;
         }
 

@@ -195,6 +195,12 @@ namespace Venkatesh2.Controls
                 .AddKeyChanger("Aim Keybind", k => uiManager.C_Keybind = k,
                     tooltip: "The key you hold to activate aim assist.")
                 .AddKeyChanger("Second Aim Keybind", tooltip: "An alternate key to activate aim assist.")
+                .AddToggle("Recoil Control",
+                    tooltip: "Drags the mouse down while holding the recoil keybind to compensate for weapon recoil.")
+                .AddSlider("Recoil Strength", "Pixels", 1, 1, 0, 100,
+                    tooltip: "Pixels per tick to drag down. Higher = stronger pull. 0 = no drag.")
+                .AddKeyChanger("Recoil Keybind",
+                    tooltip: "The key/button to hold to activate recoil drag. Defaults to LMB.")
                 .AddSeparator();
         }
 

@@ -148,6 +148,7 @@ namespace Venkatesh2
             ConfigurePropertyChangers();
             ApplyInitialSettings();
             ListenForKeybinds();
+            RecoilManager.Start();
 
             // Subscribe to display changes after everything is initialized
             DisplayManager.DisplayChanged += OnDisplayChanged;
@@ -255,7 +256,7 @@ namespace Venkatesh2
             var keybinds = new[]
             {
                 "Aim Keybind", "Second Aim Keybind", "Dynamic FOV Keybind",
-                "Emergency Stop Keybind", "Model Switch Keybind"
+                "Emergency Stop Keybind", "Model Switch Keybind", "Recoil Keybind"
             };
 
             foreach (var keybind in keybinds)
