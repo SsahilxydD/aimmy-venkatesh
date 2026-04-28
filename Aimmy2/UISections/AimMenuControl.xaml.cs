@@ -303,10 +303,10 @@ namespace Aimmy2.Controls
                         var value = s.Slider.Value;
                         if (value >= 0.98)
                             LogManager.Log(LogManager.LogLevel.Warning,
-                                "The Mouse Sensitivity you have set can cause Aimmy to be unable to aim, please decrease if you suffer from this problem", true);
+                                "The Mouse Sensitivity you have set can cause Xeno to be unable to aim, please decrease if you suffer from this problem", true);
                         else if (value <= 0.1)
                             LogManager.Log(LogManager.LogLevel.Warning,
-                                "The Mouse Sensitivity you have set can cause Aimmy to be unstable to aim, please increase if you suffer from this problem", true);
+                                "The Mouse Sensitivity you have set can cause Xeno to be unstable to aim, please increase if you suffer from this problem", true);
                     };
                 }, tooltip: "How fast the aim moves. Lower = faster and snappier, higher = slower and smoother.")
                 .AddSlider("Mouse Jitter", "Jitter", 1, 1, 0, 15, s => uiManager.S_MouseJitter = s,

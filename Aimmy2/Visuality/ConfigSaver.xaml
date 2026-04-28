@@ -9,7 +9,7 @@
         xmlns:local="clr-namespace:Visuality"
         theme:ThemeBehavior.AutoRegister="True"
         mc:Ignorable="d"
-        Title="Aimmy"
+        Title="Xeno"
         Height="193"
         Width="439"
         WindowStyle="None"

@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         xmlns:Ant="clr-namespace:AntWpf.Controls;assembly=AntWpf"
-        Title="Aimmy"
+        Title="Xeno"
         Height="200"
         Width="480"
         WindowStyle="None"

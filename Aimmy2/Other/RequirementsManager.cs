@@ -75,9 +75,9 @@ namespace Other
 
         private static void ShowLGHubNotRunningMessage()
         {
-            if (MessageBox.Show("LG HUB is not running, is it installed?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.No)
+            if (MessageBox.Show("LG HUB is not running, is it installed?", "Xeno - LG HUB Mouse Movement", MessageBoxButton.YesNo, MessageBoxImage.Error) == MessageBoxResult.No)
             {
-                if (MessageBox.Show("Would you like to install it?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+                if (MessageBox.Show("Would you like to install it?", "Xeno - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
                 {
                     new LGDownloader().Show();
                 }
@@ -86,7 +86,7 @@ namespace Other
 
         private static void ShowLGHubImproperInstallMessage()
         {
-            if (MessageBox.Show("LG HUB install is improper, would you like to install it?", "Aimmy - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+            if (MessageBox.Show("LG HUB install is improper, would you like to install it?", "Xeno - LG HUB Mouse Movement", MessageBoxButton.YesNo) == MessageBoxResult.Yes)
             {
                 new LGDownloader().Show();
             }

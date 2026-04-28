@@ -512,7 +512,7 @@ namespace Aimmy2.Other
                 // 32515 = Exclamation, 
                 // 32516 = Asterisk .. and so on)
                 iconData.hIcon = LoadIcon(IntPtr.Zero, (IntPtr)32512);
-                iconData.szTip = "CouldBeAimmyV2";
+                iconData.szTip = "XenoV2";
                 Shell_NotifyIcon(_trayIconCreated ? NIM_MODIFY : NIM_ADD, ref iconData);
                 _trayIconCreated = true;
                 if (!_eventsAttached)

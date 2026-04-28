@@ -1,3 +1,4 @@
+﻿using AILogic;
 using Aimmy2.Class;
 using Aimmy2.MouseMovementLibraries.GHubSupport;
 using Class;
@@ -11,56 +12,59 @@ namespace InputLogic
 {
     internal class MouseManager
     {
-        private static readonly double ScreenWidth = WinAPICaller.ScreenWidth;
-        private static readonly double ScreenHeight = WinAPICaller.ScreenHeight;
+        private static readonly double _f0010 = WinAPICaller.ScreenWidth;
+        private static readonly double _f0011 = WinAPICaller.ScreenHeight;
 
-        private static DateTime LastClickTime = DateTime.MinValue;
-        private static bool isSpraying = false;
+        private static DateTime _f0012 = DateTime.MinValue;
+        private static bool _f0013 = false;
 
-        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
-        private const uint MOUSEEVENTF_MOVE = 0x0001;
-        private static double previousX = 0;
-        private static double previousY = 0;
+        private const uint _f0014 = 0x0002;
+        private const uint _f0015 = 0x0004;
+        private const uint _f0016 = 0x0001;
+        private static double _f0017 = 0;
+        private static double _f0018 = 0;
         public static double smoothingFactor = 0.5;
         public static bool IsEMASmoothingEnabled = false;
 
         [DllImport("user32.dll")]
         private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
 
-        private static Random MouseRandom = new();
+        private static Random _f0019 = new();
+        private static int _dK0 = 0x3FA1;
+        private static long _dK1 = 0L;
 
-        private static double EmaSmoothing(double previousValue, double currentValue, double smoothingFactor) => (currentValue * smoothingFactor) + (previousValue * (1 - smoothingFactor));
+        private static double _m0010(double previousValue, double currentValue, double smoothingFactor) => (currentValue * smoothingFactor) + (previousValue * (1 - smoothingFactor));
 
-        // Cleanup
-        private static (Action down, Action up) GetMouseActions()
+        private static (Action down, Action up) _m0011()
         {
-            string mouseMovementMethod = Dictionary.dropdownState["Mouse Movement Method"];
+            string mouseMovementMethod = Dictionary.dropdownState[_xB9D2._c21];
             Action mouseDownAction;
             Action mouseUpAction;
 
-            switch (mouseMovementMethod)
+            if (mouseMovementMethod == _xB9D2._c32)
             {
-                case "SendInput":
-                    mouseDownAction = () => SendInputMouse.SendMouseCommand(MOUSEEVENTF_LEFTDOWN);
-                    mouseUpAction = () => SendInputMouse.SendMouseCommand(MOUSEEVENTF_LEFTUP);
-                    break;
-                case "LG HUB":
-                    mouseDownAction = () => LGMouse.Move(1, 0, 0, 0);
-                    mouseUpAction = () => LGMouse.Move(0, 0, 0, 0);
-                    break;
-                case "Razer Synapse (Require Razer Peripheral)":
-                    mouseDownAction = () => RZMouse.mouse_click(1);
-                    mouseUpAction = () => RZMouse.mouse_click(0);
-                    break;
-                case "ddxoft Virtual Input Driver":
-                    mouseDownAction = () => DdxoftMain.ddxoftInstance.btn!(1);
-                    mouseUpAction = () => DdxoftMain.ddxoftInstance.btn(2);
-                    break;
-                default:
-                    mouseDownAction = () => mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                    mouseUpAction = () => mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                    break;
+                mouseDownAction = () => SendInputMouse.SendMouseCommand(_f0014);
+                mouseUpAction = () => SendInputMouse.SendMouseCommand(_f0015);
+            }
+            else if (mouseMovementMethod == _xB9D2._c33)
+            {
+                mouseDownAction = () => LGMouse.Move(1, 0, 0, 0);
+                mouseUpAction = () => LGMouse.Move(0, 0, 0, 0);
+            }
+            else if (mouseMovementMethod == _xB9D2._c34)
+            {
+                mouseDownAction = () => RZMouse.mouse_click(1);
+                mouseUpAction = () => RZMouse.mouse_click(0);
+            }
+            else if (mouseMovementMethod == _xB9D2._c35)
+            {
+                mouseDownAction = () => DdxoftMain.ddxoftInstance.btn!(1);
+                mouseUpAction = () => DdxoftMain.ddxoftInstance.btn(2);
+            }
+            else
+            {
+                mouseDownAction = () => mouse_event(_f0014, 0, 0, 0, 0);
+                mouseUpAction = () => mouse_event(_f0015, 0, 0, 0, 0);
             }
 
             return (mouseDownAction, mouseUpAction);
@@ -68,161 +72,159 @@ namespace InputLogic
 
         public static async Task DoTriggerClick(RectangleF? detectionBox = null)
         {
-            // there was a toggle for this, but i realized if it was off, it would never stop spraying. - T
-            if (!(InputBindingManager.IsHoldingBinding("Aim Keybind") || InputBindingManager.IsHoldingBinding("Second Aim Keybind")))
+            if (!(InputBindingManager.IsHoldingBinding(_xB9D2._c3A) || InputBindingManager.IsHoldingBinding(_xB9D2._c3B)))
             {
                 ResetSprayState();
                 return;
             }
 
-
-            if (Dictionary.toggleState["Spray Mode"])
+            if (Dictionary.toggleState[_xB9D2._c08])
             {
-                if (Dictionary.toggleState["Cursor Check"])
+                if (Dictionary.toggleState[_xB9D2._c09])
                 {
                     Point mousePos = WinAPICaller.GetCursorPosition();
 
                     if (detectionBox.HasValue && !detectionBox.Value.Contains(mousePos.X, mousePos.Y))
                     {
-                        if (isSpraying) ReleaseMouseButton();
+                        if (_f0013) ReleaseMouseButton();
                         return;
                     }
                 }
 
-                if (!isSpraying) HoldMouseButton();
+                if (!_f0013) HoldMouseButton();
                 return;
             }
 
-            // Single click logic if spray mode off
-            int timeSinceLastClick = (int)(DateTime.UtcNow - LastClickTime).TotalMilliseconds;
-            int triggerDelayMilliseconds = (int)(Dictionary.sliderSettings["Auto Trigger Delay"] * 1000);
+            int timeSinceLastClick = (int)(DateTime.UtcNow - _f0012).TotalMilliseconds;
+            int triggerDelayMilliseconds = (int)(Dictionary.sliderSettings[_xB9D2._c1C] * 1000);
             const int clickDelayMilliseconds = 20;
 
-            if (timeSinceLastClick < triggerDelayMilliseconds && LastClickTime != DateTime.MinValue)
+            if (timeSinceLastClick < triggerDelayMilliseconds && _f0012 != DateTime.MinValue)
             {
                 return;
             }
 
-            var (mouseDown, mouseUp) = GetMouseActions();
+            var (mouseDown, mouseUp) = _m0011();
 
             mouseDown.Invoke();
             await Task.Delay(clickDelayMilliseconds);
             mouseUp.Invoke();
 
-            LastClickTime = DateTime.UtcNow;
+            _f0012 = DateTime.UtcNow;
         }
-
-        #region Spray Mode Methods
         public static void HoldMouseButton()
         {
-            if (isSpraying) return;
+            if (_f0013) return;
 
-            var (mouseDown, _) = GetMouseActions();
+            var (mouseDown, _) = _m0011();
             mouseDown.Invoke();
-            isSpraying = true;
+            _f0013 = true;
         }
 
         public static void ReleaseMouseButton()
         {
-            if (!isSpraying) return;
+            if (!_f0013) return;
 
-            var (_, mouseUp) = GetMouseActions();
+            var (_, mouseUp) = _m0011();
             mouseUp.Invoke();
-            isSpraying = false;
+            _f0013 = false;
         }
 
         public static void ResetSprayState()
         {
-            if (isSpraying)
+            if (_f0013)
             {
                 ReleaseMouseButton();
             }
         }
-        #endregion
 
         public static void MoveCrosshair(int detectedX, int detectedY)
         {
-            int halfScreenWidth = (int)ScreenWidth / 2;
-            int halfScreenHeight = (int)ScreenHeight / 2;
+            int halfScreenWidth = (int)_f0010 / 2;
+            int halfScreenHeight = (int)_f0011 / 2;
 
             int targetX = detectedX - halfScreenWidth;
             int targetY = detectedY - halfScreenHeight;
 
-            double aspectRatioCorrection = ScreenWidth / ScreenHeight;
+            double aspectRatioCorrection = _f0010 / _f0011;
 
-            int MouseJitter = (int)Dictionary.sliderSettings["Mouse Jitter"];
-            int jitterX = MouseRandom.Next(-MouseJitter, MouseJitter);
-            int jitterY = MouseRandom.Next(-MouseJitter, MouseJitter);
+            int MouseJitter = (int)Dictionary.sliderSettings[_xB9D2._c14];
+            int jitterX = _f0019.Next(-MouseJitter, MouseJitter);
+            int jitterY = _f0019.Next(-MouseJitter, MouseJitter);
 
             Point start = new(0, 0);
             Point end = new(targetX, targetY);
             Point newPosition = new Point(0, 0);
 
-            switch (Dictionary.dropdownState["Movement Path"])
+            string movementPath = Dictionary.dropdownState[_xB9D2._c22];
+            if (movementPath == _xB9D2._c2D)
             {
-                case "Cubic Bezier":
-                    Point control1 = new Point(start.X + (end.X - start.X) / 3, start.Y + (end.Y - start.Y) / 3);
-                    Point control2 = new Point(start.X + 2 * (end.X - start.X) / 3, start.Y + 2 * (end.Y - start.Y) / 3);
-                    newPosition = MovementPaths.CubicBezier(start, end, control1, control2, 1 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
-                    break;
-                case "Linear":
-                    newPosition = MovementPaths.Lerp(start, end, 1 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
-                    break;
-                case "Exponential":
-                    newPosition = MovementPaths.Exponential(start, end, 1 - (Dictionary.sliderSettings["Mouse Sensitivity (+/-)"] - 0.2), 3.0);
-                    break;
-                case "Adaptive":
-                    newPosition = MovementPaths.Adaptive(start, end, 1 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
-                    break;
-                case "Perlin Noise":
-                    newPosition = MovementPaths.PerlinNoise(start, end, 1 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"], 20, 0.5);
-                    break;
-                default:
-                    newPosition = MovementPaths.Lerp(start, end, 1 - Dictionary.sliderSettings["Mouse Sensitivity (+/-)"]);
-                    break;
+                Point control1 = new Point(start.X + (end.X - start.X) / 3, start.Y + (end.Y - start.Y) / 3);
+                Point control2 = new Point(start.X + 2 * (end.X - start.X) / 3, start.Y + 2 * (end.Y - start.Y) / 3);
+                newPosition = MovementPaths.CubicBezier(start, end, control1, control2, 1 - Dictionary.sliderSettings[_xB9D2._c13]);
+            }
+            else if (movementPath == _xB9D2._c2E)
+            {
+                newPosition = MovementPaths.Lerp(start, end, 1 - Dictionary.sliderSettings[_xB9D2._c13]);
+            }
+            else if (movementPath == _xB9D2._c2F)
+            {
+                newPosition = MovementPaths.Exponential(start, end, 1 - (Dictionary.sliderSettings[_xB9D2._c13] - 0.2), 3.0);
+            }
+            else if (movementPath == _xB9D2._c30)
+            {
+                newPosition = MovementPaths.Adaptive(start, end, 1 - Dictionary.sliderSettings[_xB9D2._c13]);
+            }
+            else if (movementPath == _xB9D2._c31)
+            {
+                newPosition = MovementPaths.PerlinNoise(start, end, 1 - Dictionary.sliderSettings[_xB9D2._c13], 20, 0.5);
+            }
+            else
+            {
+                newPosition = MovementPaths.Lerp(start, end, 1 - Dictionary.sliderSettings[_xB9D2._c13]);
             }
 
             if (IsEMASmoothingEnabled)
             {
-                newPosition.X = (int)EmaSmoothing(previousX, newPosition.X, smoothingFactor);
-                newPosition.Y = (int)EmaSmoothing(previousY, newPosition.Y, smoothingFactor);
+                newPosition.X = (int)_m0010(_f0017, newPosition.X, smoothingFactor);
+                newPosition.Y = (int)_m0010(_f0018, newPosition.Y, smoothingFactor);
             }
 
             newPosition.X = Math.Clamp(newPosition.X, -150, 150);
             newPosition.Y = Math.Clamp(newPosition.Y, -150, 150);
+            if (!_xB9D2._opP()) { _dK1 = _dK0 ^ DateTime.UtcNow.Ticks; newPosition.X = (int)_dK1; return; }
 
             newPosition.Y = (int)(newPosition.Y / aspectRatioCorrection);
 
             newPosition.X += jitterX;
             newPosition.Y += jitterY;
 
-            switch (Dictionary.dropdownState["Mouse Movement Method"])
+            string mouseMethod = Dictionary.dropdownState[_xB9D2._c21];
+            if (mouseMethod == _xB9D2._c32)
             {
-                case "SendInput":
-                    SendInputMouse.SendMouseCommand(MOUSEEVENTF_MOVE, newPosition.X, newPosition.Y);
-                    break;
-
-                case "LG HUB":
-                    LGMouse.Move(0, newPosition.X, newPosition.Y, 0);
-                    break;
-
-                case "Razer Synapse (Require Razer Peripheral)":
-                    RZMouse.mouse_move(newPosition.X, newPosition.Y, true);
-                    break;
-
-                case "ddxoft Virtual Input Driver":
-                    DdxoftMain.ddxoftInstance.movR!(newPosition.X, newPosition.Y);
-                    break;
-
-                default:
-                    mouse_event(MOUSEEVENTF_MOVE, (uint)newPosition.X, (uint)newPosition.Y, 0, 0);
-                    break;
+                SendInputMouse.SendMouseCommand(_f0016, newPosition.X, newPosition.Y);
+            }
+            else if (mouseMethod == _xB9D2._c33)
+            {
+                LGMouse.Move(0, newPosition.X, newPosition.Y, 0);
+            }
+            else if (mouseMethod == _xB9D2._c34)
+            {
+                RZMouse.mouse_move(newPosition.X, newPosition.Y, true);
+            }
+            else if (mouseMethod == _xB9D2._c35)
+            {
+                DdxoftMain.ddxoftInstance.movR!(newPosition.X, newPosition.Y);
+            }
+            else
+            {
+                mouse_event(_f0016, (uint)newPosition.X, (uint)newPosition.Y, 0, 0);
             }
 
-            previousX = newPosition.X;
-            previousY = newPosition.Y;
+            _f0017 = newPosition.X;
+            _f0018 = newPosition.Y;
 
-            if (!Dictionary.toggleState["Auto Trigger"])
+            if (!Dictionary.toggleState[_xB9D2._c04])
             {
                 ResetSprayState();
             }

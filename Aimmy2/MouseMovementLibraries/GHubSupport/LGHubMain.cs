@@ -9,7 +9,7 @@ namespace Aimmy2.MouseMovementLibraries.GHubSupport
         {
             if (!RequirementsManager.CheckForGhub())
             {
-                MessageBox.Show("Unfortunately, LG HUB Mouse is not here.", "Aimmy");
+                MessageBox.Show("Unfortunately, LG HUB Mouse is not here.", "Xeno");
                 return false;
             }
 
@@ -23,13 +23,13 @@ namespace Aimmy2.MouseMovementLibraries.GHubSupport
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show("Unfortunately, LG HUB Mouse Movement mode cannot be ran sufficiently.\n" + ex.ToString(), "Aimmy");
+                    MessageBox.Show("Unfortunately, LG HUB Mouse Movement mode cannot be ran sufficiently.\n" + ex.ToString(), "Xeno");
                     return false;
                 }
             }
             else
             {
-                MessageBox.Show("Memory Integrity is enabled. Please disable it to use LG HUB Mouse Movement mode.", "Aimmy");
+                MessageBox.Show("Memory Integrity is enabled. Please disable it to use LG HUB Mouse Movement mode.", "Xeno");
                 return false;
             }
         }

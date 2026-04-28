@@ -34,7 +34,7 @@ namespace Aimmy2
             {
                 // If startup window fails, launch main window directly
                 MessageBox.Show($"Startup animation failed: {ex.Message}\nLaunching main application...",
-                              "Aimmy AI", MessageBoxButton.OK, MessageBoxImage.Information);
+                              "Xeno AI", MessageBoxButton.OK, MessageBoxImage.Information);
 
                 var mainWindow = new MainWindow();
                 MainWindow = mainWindow;

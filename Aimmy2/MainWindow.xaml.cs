@@ -1,4 +1,4 @@
-using Aimmy2.Class;
+﻿using Aimmy2.Class;
 using Aimmy2.Controls;
 using Aimmy2.MouseMovementLibraries.GHubSupport;
 using Aimmy2.Other;
@@ -165,9 +165,9 @@ namespace Aimmy2
             if (Directory.GetCurrentDirectory().Contains("Temp"))
             {
                 MessageBox.Show(
-                    "Hi, it is made aware that you are running Aimmy without extracting it from the zip file. " +
-                    "Please extract Aimmy from the zip file or Aimmy will not be able to run properly.\n\nThank you.",
-                    "Aimmy V2");
+                    "Hi, it is made aware that you are running Xeno without extracting it from the zip file. " +
+                    "Please extract Xeno from the zip file or Xeno will not be able to run properly.\n\nThank you.",
+                    "Xeno V2");
             }
         }
 
@@ -948,7 +948,7 @@ namespace Aimmy2
                 {
                     MessageBox.Show(
                         $"The creator of this model suggests you use this model:\n{suggestedModel}",
-                        "Suggested Model - Aimmy");
+                        "Suggested Model - Xeno");
                 }
             }
         }

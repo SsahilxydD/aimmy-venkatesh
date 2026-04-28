@@ -9,7 +9,7 @@
         xmlns:theme="clr-namespace:Aimmy2.Theme"
         theme:ThemeBehavior.AutoRegister="True"
         mc:Ignorable="d"
-        Title="Aimmy"
+        Title="Xeno"
         Height="444"
         MinHeight="444"
         Width="670"
@@ -70,7 +70,7 @@
                 <Grid x:Name="Topbar"
                       VerticalAlignment="Top"
                       Height="50">
-                    <Path x:Name="AimmyLogo"
+                    <Path x:Name="XenoLogo"
                           Fill="White"
                           StrokeThickness="1.33333"
                           Stretch="Fill"
@@ -84,7 +84,7 @@
                                           FillRule="NonZero" />
                         </Path.Data>
                     </Path>
-                    <Label Content="Aimmy"
+                    <Label Content="Xeno"
                            HorizontalAlignment="Left"
                            Margin="45,0,0,0"
                            VerticalAlignment="Center"

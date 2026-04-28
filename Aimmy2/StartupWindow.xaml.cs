@@ -142,7 +142,7 @@ namespace Aimmy2
             UpdateCentralGlow(baseColor);
 
             // Keep white shadow for logo
-            if (FindName("AimmyLogo") is Path logo && logo.Effect is DropShadowEffect shadowEffect)
+            if (FindName("XenoLogo") is Path logo && logo.Effect is DropShadowEffect shadowEffect)
                 shadowEffect.Color = Colors.White;
         }
 

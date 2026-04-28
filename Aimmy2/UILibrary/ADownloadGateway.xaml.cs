@@ -45,7 +45,7 @@ namespace Aimmy2.UILibrary
         {
             if (!httpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                httpClient.DefaultRequestHeaders.Add("User-Agent", "Aimmy2");
+                httpClient.DefaultRequestHeaders.Add("User-Agent", "Xeno");
             }
             if (!httpClient.DefaultRequestHeaders.Contains("Accept"))
             {

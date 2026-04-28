@@ -238,9 +238,9 @@ namespace Aimmy2.Controls
                     {
                         var value = s.Slider.Value;
                         if (value >= 95)
-                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Aimmy to be too high and may be unable to detect players.", true);
+                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Xeno to be too high and may be unable to detect players.", true);
                         else if (value <= 35)
-                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Aimmy may be too low can cause false positives.", true);
+                            LogManager.Log(LogLevel.Warning, "The minimum confidence you have set for Xeno may be too low can cause false positives.", true);
                     };
                 }, tooltip: "How sure the AI must be before targeting. Higher = fewer false detections but may miss targets.")
                 .AddToggle("Enable Model Switch Keybind", t => uiManager.T_EnableModelSwitchKeybind = t,

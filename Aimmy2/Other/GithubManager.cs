@@ -11,7 +11,7 @@ namespace Aimmy2.Other
         public GithubManager()
         {
             httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Add("User-Agent", "Aimmy2");
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Xeno");
             httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
         }
 

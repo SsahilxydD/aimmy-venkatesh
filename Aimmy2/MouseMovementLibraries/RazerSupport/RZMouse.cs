@@ -108,7 +108,7 @@ namespace MouseMovementLibraries.RazerSupport
                 return true;
 
             var response = MessageBox.Show("Razer Synapse is not running. Do you have it installed?",
-                                           "Aimmy - Razer Synapse", MessageBoxButton.YesNo);
+                                           "Xeno - Razer Synapse", MessageBoxButton.YesNo);
             if (response == MessageBoxResult.No)
             {
                 await DownloadAndInstallRazerSynapse();
@@ -118,7 +118,7 @@ namespace MouseMovementLibraries.RazerSupport
             if (!IsRazerSynapseInstalled())
             {
                 var install = MessageBox.Show("Razer Synapse is not installed. Would you like to install it?",
-                                              "Aimmy - Razer Synapse", MessageBoxButton.YesNo);
+                                              "Xeno - Razer Synapse", MessageBoxButton.YesNo);
                 if (install == MessageBoxResult.Yes)
                 {
                     await DownloadAndInstallRazerSynapse();

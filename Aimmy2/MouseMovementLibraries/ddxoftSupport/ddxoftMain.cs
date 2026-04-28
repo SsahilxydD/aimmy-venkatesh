@@ -40,7 +40,7 @@ namespace MouseMovementLibraries.ddxoftSupport
             {
                 if (new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator) == false)
                 {
-                    MessageBox.Show("The ddxoft Virtual Input Driver requires Aimmy to be run as an administrator, please close Aimmy and run it as administrator to use this movement method.", "Aimmy");
+                    MessageBox.Show("The ddxoft Virtual Input Driver requires Xeno to be run as an administrator, please close Xeno and run it as administrator to use this movement method.", "Xeno");
                     return false;
                 }
 
@@ -52,7 +52,7 @@ namespace MouseMovementLibraries.ddxoftSupport
 
                 if (ddxoftInstance.Load(ddxoftpath) != 1 || ddxoftInstance.btn!(0) != 1)
                 {
-                    MessageBox.Show("The ddxoft virtual input driver is not compatible with your PC, please try a different Mouse Movement Method.", "Aimmy");
+                    MessageBox.Show("The ddxoft virtual input driver is not compatible with your PC, please try a different Mouse Movement Method.", "Xeno");
                     return false;
                 }
 
@@ -60,7 +60,7 @@ namespace MouseMovementLibraries.ddxoftSupport
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to load ddxoft virtual input driver.\n\n" + ex.ToString(), "Aimmy");
+                MessageBox.Show("Failed to load ddxoft virtual input driver.\n\n" + ex.ToString(), "Xeno");
                 return false;
             }
         }
