@@ -203,6 +203,14 @@ namespace Venkatesh2.Controls
                     tooltip: "How many times per second the drag fires. Higher = smoother but more aggressive total pull. 100 Hz is a sane default.")
                 .AddKeyChanger("Recoil Keybind",
                     tooltip: "The key/button to hold to activate recoil drag. Defaults to LMB.")
+                .AddToggle("Up Recoil Control",
+                    tooltip: "Drags the mouse up while holding the up-recoil keybind. Mirror of Recoil Control for weapons or scenarios where the gun pulls down.")
+                .AddSlider("Up Recoil Strength", "Pixels", 1, 1, 0, 100,
+                    tooltip: "Pixels per tick to drag up. Higher = stronger pull. 0 = no drag.")
+                .AddSlider("Up Recoil Tick Rate", "Hz", 10, 10, 10, 500,
+                    tooltip: "How many times per second the up-drag fires. 100 Hz is a sane default.")
+                .AddKeyChanger("Up Recoil Keybind",
+                    tooltip: "The key/button to hold to activate upward recoil drag. Defaults to RMB.")
                 .AddSeparator();
         }
 

@@ -256,7 +256,8 @@ namespace Venkatesh2
             var keybinds = new[]
             {
                 "Aim Keybind", "Second Aim Keybind", "Dynamic FOV Keybind",
-                "Emergency Stop Keybind", "Model Switch Keybind", "Recoil Keybind"
+                "Emergency Stop Keybind", "Model Switch Keybind",
+                "Recoil Keybind", "Up Recoil Keybind"
             };
 
             foreach (var keybind in keybinds)

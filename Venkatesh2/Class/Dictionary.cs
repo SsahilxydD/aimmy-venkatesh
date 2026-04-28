@@ -16,7 +16,8 @@ namespace Venkatesh2.Class
             { "Dynamic FOV Keybind", "Left"},
             { "Emergency Stop Keybind", "Delete"},
             { "Model Switch Keybind", "OemPipe"},
-            { "Recoil Keybind", "Left"}
+            { "Recoil Keybind", "Left"},
+            { "Up Recoil Keybind", "Right"}
         };
 
         public static Dictionary<string, dynamic> sliderSettings = new()
@@ -28,6 +29,8 @@ namespace Venkatesh2.Class
             { "Mouse Jitter", 0 },
             { "Recoil Strength", 0 },
             { "Recoil Tick Rate", 100 },
+            { "Up Recoil Strength", 0 },
+            { "Up Recoil Tick Rate", 100 },
             { "Sticky Aim Threshold", 50 },
             { "Y Offset (Up/Down)", 0 },
             { "Y Offset (%)", 50 },
@@ -49,6 +52,7 @@ namespace Venkatesh2.Class
             { "Sticky Aim", false },
             { "Constant AI Tracking", false },
             { "Recoil Control", false },
+            { "Up Recoil Control", false },
             { "Enable Model Switch Keybind", true },
             { "FOV", false },
             { "Dynamic FOV", false },

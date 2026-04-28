@@ -27,6 +27,12 @@ namespace InputLogic
             _dispatchMove(0, _px);
         }
 
+        internal static void DragUp(int _px)
+        {
+            if (_px <= 0) return;
+            _dispatchMove(0, -_px);
+        }
+
         private static readonly uint _eMV = (uint)(0x1);
 
         private static double _spX = 0.0;

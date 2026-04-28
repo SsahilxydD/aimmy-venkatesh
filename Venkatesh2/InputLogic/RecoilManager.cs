@@ -29,39 +29,67 @@ namespace InputLogic
         private static void Run()
         {
             var sw = Stopwatch.StartNew();
-            long nextTickTicks = sw.ElapsedTicks;
+            long nextDownTick = sw.ElapsedTicks;
+            long nextUpTick = sw.ElapsedTicks;
 
             while (_running)
             {
-                bool active = Dictionary.toggleState["Recoil Control"]
-                           && InputBindingManager.IsHoldingBinding("Recoil Keybind");
+                bool downActive = Dictionary.toggleState["Recoil Control"]
+                               && InputBindingManager.IsHoldingBinding("Recoil Keybind");
+                bool upActive = Dictionary.toggleState["Up Recoil Control"]
+                             && InputBindingManager.IsHoldingBinding("Up Recoil Keybind");
 
-                if (active)
+                long now = sw.ElapsedTicks;
+
+                if (downActive)
                 {
-                    int px = (int)Convert.ToDouble(Dictionary.sliderSettings["Recoil Strength"]);
-                    if (px > 0) MouseManager.DragDown(px);
-
-                    double hz = Convert.ToDouble(Dictionary.sliderSettings["Recoil Tick Rate"]);
-                    if (hz < 1) hz = 1;
-                    long periodTicks = (long)(Stopwatch.Frequency / hz);
-
-                    nextTickTicks += periodTicks;
-                    long now = sw.ElapsedTicks;
-                    long remaining = nextTickTicks - now;
-                    if (remaining > 0)
+                    if (now >= nextDownTick)
                     {
-                        int ms = (int)(remaining * 1000 / Stopwatch.Frequency);
-                        if (ms > 0) Thread.Sleep(ms);
-                    }
-                    else
-                    {
-                        nextTickTicks = now;
+                        int px = (int)Convert.ToDouble(Dictionary.sliderSettings["Recoil Strength"]);
+                        if (px > 0) MouseManager.DragDown(px);
+
+                        double hz = Convert.ToDouble(Dictionary.sliderSettings["Recoil Tick Rate"]);
+                        if (hz < 1) hz = 1;
+                        nextDownTick = now + (long)(Stopwatch.Frequency / hz);
                     }
                 }
                 else
                 {
-                    nextTickTicks = sw.ElapsedTicks;
+                    nextDownTick = now;
+                }
+
+                if (upActive)
+                {
+                    if (now >= nextUpTick)
+                    {
+                        int px = (int)Convert.ToDouble(Dictionary.sliderSettings["Up Recoil Strength"]);
+                        if (px > 0) MouseManager.DragUp(px);
+
+                        double hz = Convert.ToDouble(Dictionary.sliderSettings["Up Recoil Tick Rate"]);
+                        if (hz < 1) hz = 1;
+                        nextUpTick = now + (long)(Stopwatch.Frequency / hz);
+                    }
+                }
+                else
+                {
+                    nextUpTick = now;
+                }
+
+                if (!downActive && !upActive)
+                {
                     Thread.Sleep(5);
+                    continue;
+                }
+
+                long target = long.MaxValue;
+                if (downActive) target = Math.Min(target, nextDownTick);
+                if (upActive) target = Math.Min(target, nextUpTick);
+
+                long remaining = target - sw.ElapsedTicks;
+                if (remaining > 0)
+                {
+                    int ms = (int)(remaining * 1000 / Stopwatch.Frequency);
+                    if (ms > 0) Thread.Sleep(ms);
                 }
             }
         }
